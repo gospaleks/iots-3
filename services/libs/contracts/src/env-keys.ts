@@ -11,12 +11,9 @@ export const ENV_KEYS = {
   // MQTT
   QOS_LEVEL: 'QOS_LEVEL',
   MQTT_CLEAN_SESSION: 'MQTT_CLEAN_SESSION',
-  // MQTT keepalive (s). Low values let the broker detect a dead client fast — needed in
-  // Scenario B so a sub-keepalive outage actually tears the session down (clean vs persistent).
+  // MQTT keepalive (s). Low values let the broker detect a dead client fast (e.g. an
+  // offline subscriber → clean vs persistent session behaviour).
   MQTT_KEEPALIVE_SEC: 'MQTT_KEEPALIVE_SEC',
-  // Kafka
-  KAFKA_ACKS: 'KAFKA_ACKS',
-  KAFKA_GROUP_ID: 'KAFKA_GROUP_ID',
 } as const;
 
 export type EnvKey = (typeof ENV_KEYS)[keyof typeof ENV_KEYS];

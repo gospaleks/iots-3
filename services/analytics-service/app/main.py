@@ -60,7 +60,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.state.cfg = load_config()
 
-# CORS for the optional dashboard (additive: only sets response headers, off the benchmark path).
+# CORS for an optional browser web app (additive: only sets response headers).
 # CORS_ORIGINS is a comma-separated allowlist; default "*" reflects any origin (local demo default).
 app.add_middleware(
     CORSMiddleware,

@@ -7,7 +7,7 @@ import { loadStorageConfig } from './config/storage.config';
 async function bootstrap(): Promise<void> {
   const cfg = loadStorageConfig();
   const app = await NestFactory.create(AppModule, { bufferLogs: false });
-  // CORS for the optional dashboard (additive: only sets response headers, off the benchmark path).
+  // CORS for an optional browser web app (additive: only sets response headers).
   // CORS_ORIGINS is a comma-separated allowlist; unset or "*" ⇒ reflect any origin (local demo
   // default). Note: the cors lib treats "*" as a wildcard only as a bare string, not inside an
   // array — so wildcard must map to `true` (reflect), which also works for localhost vs 127.0.0.1.

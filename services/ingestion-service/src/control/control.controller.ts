@@ -2,8 +2,8 @@ import { BadRequestException, Controller, Get, Post, Query } from '@nestjs/commo
 import { SimulatorService } from '../simulator/simulator.service';
 
 /**
- * Small HTTP control surface for the simulator — lets benchmark scripts drive it
- * (e.g. scenario-c.sh curls /burst) and lets `/health` + `/stats` be polled.
+ * Small HTTP control surface for the simulator — lets clients drive a burst
+ * (POST /burst) and poll `/health` + `/stats`.
  */
 @Controller()
 export class ControlController {

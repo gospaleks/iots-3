@@ -88,7 +88,7 @@ class TumblingWindow:
             f"AvgTemp: {avg_temp:.2f}°F | AvgHumidity: {avg_hum:.2f}% | AvgCO: {avg_co:.5f}ppm | {verdict}",
             flush=True,
         )
-        # Parseable latency line (Scenario D).
+        # Parseable latency line.
         print(
             f"[LATENCY] window_end={end_iso} msgs={count} "
             f"event_to_alert_ms_avg={e2a_avg:.1f} event_to_alert_ms_max={e2a_max:.1f}",

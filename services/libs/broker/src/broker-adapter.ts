@@ -1,6 +1,6 @@
 import { SensorMessage } from '@iots/contracts';
 
-export type BrokerType = 'mqtt' | 'kafka';
+export type BrokerType = 'mqtt';
 
 /** Metadata captured at receive time — `receivedAtMs` feeds transport latency. */
 export interface ReceivedMeta {
@@ -19,7 +19,7 @@ export interface BrokerAdapter {
   disconnect(): Promise<void>;
 }
 
-/** Ingestion side. QoS/acks are adapter-internal — the interface stays broker-neutral. */
+/** Ingestion side. QoS is adapter-internal — the interface stays broker-neutral. */
 export interface PublisherAdapter extends BrokerAdapter {
   publish(topic: string, message: SensorMessage): Promise<void>;
 }

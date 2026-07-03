@@ -1,6 +1,0 @@
-# Benchmark run outputs are regenerated per run (Iteration 7) — keep only the
-# directory structure in git, not the CSV/log artifacts.
-*
-!*/
-!.gitignore
-!.gitkeep

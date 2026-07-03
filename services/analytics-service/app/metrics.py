@@ -1,4 +1,4 @@
-"""Running metrics for /stats and the dual-latency report (Scenario D)."""
+"""Running metrics for /stats and the dual-latency report."""
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field

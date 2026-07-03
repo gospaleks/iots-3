@@ -2,7 +2,7 @@
   "name": "@iots/broker",
   "version": "0.0.0",
   "private": true,
-  "description": "BrokerAdapter abstraction (mqtt.js / kafkajs) + Nest DI factory keyed on BROKER_TYPE.",
+  "description": "BrokerAdapter abstraction (mqtt.js) + Nest DI factory keyed on BROKER_TYPE.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -12,7 +12,6 @@
   },
   "dependencies": {
     "@iots/contracts": "*",
-    "kafkajs": "^2.2.4",
     "mqtt": "^5.10.3",
     "reflect-metadata": "^0.2.2"
   },

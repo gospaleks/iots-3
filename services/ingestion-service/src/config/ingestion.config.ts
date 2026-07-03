@@ -1,4 +1,4 @@
-import { ENV_KEYS, KAFKA_TOPIC, MQTT_TOPIC } from '@iots/contracts';
+import { ENV_KEYS, MQTT_TOPIC } from '@iots/contracts';
 
 export const INGESTION_CONFIG = Symbol('INGESTION_CONFIG');
 
@@ -27,8 +27,6 @@ function int(raw: string | undefined, fallback: number): number {
 }
 
 export function loadIngestionConfig(env: NodeJS.ProcessEnv = process.env): IngestionConfig {
-  const brokerType = env[ENV_KEYS.BROKER_TYPE] ?? 'mqtt';
-  const defaultTopic = brokerType === 'kafka' ? KAFKA_TOPIC : MQTT_TOPIC;
   const dataSource = (env.DATA_SOURCE ?? 'replay') as DataSourceKind;
   if (dataSource !== 'replay' && dataSource !== 'random') {
     throw new Error(`Invalid DATA_SOURCE "${dataSource}" (expected "replay" | "random")`);
@@ -37,7 +35,7 @@ export function loadIngestionConfig(env: NodeJS.ProcessEnv = process.env): Inges
     numDevices: int(env.NUM_DEVICES, 100),
     messagesPerSecond: int(env.MESSAGES_PER_SECOND, 10),
     burstTargetRate: int(env.BURST_TARGET_RATE, 5000),
-    topic: env[ENV_KEYS.TOPIC] ?? defaultTopic,
+    topic: env[ENV_KEYS.TOPIC] ?? MQTT_TOPIC,
     dataSource,
     datasetPath: env.DATASET_PATH ?? '/data/iot_telemetry_data.csv',
     replaySampleSize: int(env.REPLAY_SAMPLE_SIZE, 10_000),

@@ -1,8 +1,8 @@
 {
-  "name": "iots2-services",
+  "name": "iots3-services",
   "private": true,
   "version": "0.0.0",
-  "description": "IoTS Project 2 — NestJS service workspaces (shared libs + services).",
+  "description": "IoTS Project 3 — NestJS service workspaces (shared libs + services).",
   "workspaces": [
     "libs/*",
     "ingestion-service",

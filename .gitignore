@@ -3,6 +3,10 @@
 !/data/.gitkeep
 !/data/README.md
 
+# --- MaaS model artifacts (built by maas/train.py; uncomment when they exist) ---
+# maas/models/*.joblib
+# maas/models/*.keras
+
 # --- Node / NestJS ---
 node_modules/
 dist/

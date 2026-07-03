@@ -15,8 +15,8 @@ export class MqttAdapter implements PublisherAdapter, SubscriberAdapter {
       host: this.config.host,
       port: this.config.port,
       clientId: this.config.clientId,
-      clean: this.config.cleanSession, // clean:false ⇒ persistent session (Scenario B)
-      keepalive: this.config.keepaliveSec, // low ⇒ broker detects dead client fast (Scenario B)
+      clean: this.config.cleanSession, // clean:false ⇒ persistent session (offline subscriber buffering)
+      keepalive: this.config.keepaliveSec, // low ⇒ broker detects a dead client fast
       reconnectPeriod: 1000,
     };
     await new Promise<void>((resolve, reject) => {

@@ -1,4 +1,4 @@
-import { ENV_KEYS, KAFKA_TOPIC, MQTT_TOPIC } from '@iots/contracts';
+import { ENV_KEYS, MQTT_TOPIC } from '@iots/contracts';
 
 export const STORAGE_CONFIG = Symbol('STORAGE_CONFIG');
 
@@ -24,9 +24,6 @@ function int(raw: string | undefined, fallback: number): number {
 }
 
 export function loadStorageConfig(env: NodeJS.ProcessEnv = process.env): StorageConfig {
-  const brokerType = env[ENV_KEYS.BROKER_TYPE] ?? 'mqtt';
-  const defaultTopic = brokerType === 'kafka' ? KAFKA_TOPIC : MQTT_TOPIC;
-
   const writeMode = (env.WRITE_MODE ?? 'DIRECT').toUpperCase() as WriteMode;
   if (writeMode !== 'DIRECT' && writeMode !== 'BATCH') {
     throw new Error(`Invalid WRITE_MODE "${env.WRITE_MODE}" (expected "DIRECT" | "BATCH")`);
@@ -34,7 +31,7 @@ export function loadStorageConfig(env: NodeJS.ProcessEnv = process.env): Storage
 
   return {
     databaseUrl: env.DATABASE_URL ?? 'postgresql://iot:iot@timescaledb:5432/iotdb',
-    topic: env[ENV_KEYS.TOPIC] ?? defaultTopic,
+    topic: env[ENV_KEYS.TOPIC] ?? MQTT_TOPIC,
     writeMode,
     batchSize: int(env.BATCH_SIZE, 500),
     flushIntervalMs: int(env.FLUSH_INTERVAL_MS, 1000),

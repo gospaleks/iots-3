@@ -1,7 +1,7 @@
 /**
- * Per-device sequence tracking → loss/duplicate metrics for Scenarios A/B/C.
- * `seq` is monotonic per device (ingestion guarantees it; Kafka keeps order via
- * device-keyed partitioning). Interpreting the next seq for a device:
+ * Per-device sequence tracking → loss/duplicate/ordering metrics.
+ * `seq` is monotonic per device (ingestion guarantees it). Interpreting the next seq
+ * for a device:
  *   - prev+1        → in order
  *   - > prev+1      → gap: (seq − prev − 1) messages missing
  *   - == prev       → duplicate

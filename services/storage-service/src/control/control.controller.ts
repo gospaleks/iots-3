@@ -2,7 +2,7 @@ import { Controller, Get } from '@nestjs/common';
 import { SensorWriterService } from '../storage/sensor-writer.service';
 import { SubscriberService } from '../storage/subscriber.service';
 
-/** Read-only control surface for monitoring storage during benchmark runs. */
+/** Read-only control surface for monitoring storage (/health, /stats). */
 @Controller()
 export class ControlController {
   constructor(

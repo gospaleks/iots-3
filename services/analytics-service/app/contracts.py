@@ -7,9 +7,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# Topics (overridable via TOPIC env var).
+# Topic (overridable via TOPIC env var).
 MQTT_TOPIC = "sensors/telemetry"
-KAFKA_TOPIC = "sensor-telemetry"
 
 
 @dataclass(slots=True)

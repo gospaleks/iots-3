@@ -1,7 +1,6 @@
 import 'reflect-metadata';
 import { DynamicModule, Module, Provider } from '@nestjs/common';
 import { BrokerConfig, loadBrokerConfig } from './broker.config';
-import { KafkaAdapter } from './kafka.adapter';
 import { MqttAdapter } from './mqtt.adapter';
 
 /** DI tokens — business code injects BROKER_ADAPTER, never a concrete adapter. */
@@ -11,13 +10,13 @@ export const BROKER_CONFIG = Symbol('BROKER_CONFIG');
 /**
  * The one and only place that maps BROKER_TYPE → concrete adapter.
  * Exported standalone so it can be unit-tested without bootstrapping Nest.
+ * Project 3 is MQTT-only; the abstraction is kept so a second broker could slot
+ * back in without touching business code.
  */
-export function createBrokerAdapter(config: BrokerConfig): MqttAdapter | KafkaAdapter {
+export function createBrokerAdapter(config: BrokerConfig): MqttAdapter {
   switch (config.type) {
     case 'mqtt':
       return new MqttAdapter(config);
-    case 'kafka':
-      return new KafkaAdapter(config);
     default:
       throw new Error(`Unsupported broker type: ${(config as BrokerConfig).type}`);
   }

@@ -1,8 +1,9 @@
 """Broker abstraction — the Python mirror of @iots/broker's SubscriberAdapter.
 
-Analytics is subscribe-only. Each adapter exposes a single async generator that
+Analytics is subscribe-only. The adapter exposes a single async generator that
 yields (SensorMessage, ReceivedMeta) pairs; the factory keyed on BROKER_TYPE is the
-only place that knows both brokers exist (mirrors createBrokerAdapter in TS).
+one place that constructs it (mirrors createBrokerAdapter in TS). Project 3 is
+MQTT-only; the abstraction is kept so a second broker could slot back in cleanly.
 """
 from __future__ import annotations
 
@@ -35,8 +36,4 @@ def create_adapter(cfg: Config) -> SubscriberAdapter:
         from .mqtt_adapter import MqttAdapter
 
         return MqttAdapter(cfg)
-    if cfg.broker_type == "kafka":
-        from .kafka_adapter import KafkaAdapter
-
-        return KafkaAdapter(cfg)
     raise ValueError(f"Unsupported broker type: {cfg.broker_type}")

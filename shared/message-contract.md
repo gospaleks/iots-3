@@ -1,6 +1,6 @@
 # Message Contract
 
-> The canonical broker payload and topic conventions shared by all three services. NestJS services consume the typed DTO from `services/libs/contracts`; the FastAPI service mirrors this shape. JSON only — no Avro/Protobuf (DECISIONS §6).
+> The canonical broker payload and topic conventions for the **raw telemetry** stream, shared by all services. NestJS services consume the typed DTO from `services/libs/contracts`; the FastAPI service mirrors this shape. JSON only. Project 3 is MQTT-only.
 
 ## Payload (JSON)
 
@@ -34,28 +34,29 @@
 
 ## Topics
 
-| Broker | Topic              |
-|--------|--------------------|
-| MQTT   | `sensors/telemetry`|
-| Kafka  | `sensor-telemetry` |
+| Purpose | Topic | Producer | Consumers |
+|---------|-------|----------|-----------|
+| Raw telemetry | `sensors/telemetry` (**`RAW_TOPIC`**) | Ingestion | Storage, eKuiper |
+| CEP events *(added with eKuiper)* | `sensors/events` | eKuiper | Analytics |
 
-Both are configurable via the `TOPIC` env var.
+The topic name is configurable via the `TOPIC` env var. This document specifies the raw
+telemetry payload; the `sensors/events` payload is defined when the eKuiper layer is built
+(see [docs/REQUIREMENTS-IoTS-3.md §5.1](../docs/REQUIREMENTS-IoTS-3.md)).
 
 ## Delivery / fan-out
 
-- **Ingestion** is the only publisher.
-- **Storage** and **Analytics** are subscribers only.
-- **Kafka:** Storage = consumer group A, Analytics = consumer group B (each group receives the full stream).
-- **MQTT:** both subscribe to the same topic (standard fan-out; single instance each, so no shared subscriptions).
+- **Ingestion** is the only publisher of raw telemetry.
+- **Storage** and **eKuiper** subscribe to `sensors/telemetry` (standard MQTT fan-out; single
+  instance each, so no shared subscriptions).
+- **Analytics** (after the P3 rewire) subscribes to `sensors/events`, not the raw topic.
 
 ## Reliability knobs
 
-| Broker | Knob        | Values            | Env var     |
-|--------|-------------|-------------------|-------------|
-| MQTT   | QoS         | 0, 1, 2           | `QOS_LEVEL` |
-| Kafka  | producer acks | 0, 1, all       | `KAFKA_ACKS`|
+| Knob | Values | Env var     |
+|------|--------|-------------|
+| MQTT QoS | 0, 1, 2 | `QOS_LEVEL` |
 
-## Latency metrics (Scenario D)
+## Latency metrics
 
 | Metric              | Formula                       |
 |---------------------|-------------------------------|

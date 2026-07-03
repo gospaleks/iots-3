@@ -79,7 +79,7 @@ export class SimulatorService implements OnModuleInit, OnModuleDestroy {
     this.logger.log(`simulator stopped: published=${this.published} errors=${this.errors}`);
   }
 
-  /** Jump the total fleet rate to the burst target for `durationSec`, then revert (Scenario C). */
+  /** Jump the total fleet rate to the burst target for `durationSec`, then revert. */
   triggerBurst(durationSec: number): BurstResult {
     if (this.burstHandle) clearTimeout(this.burstHandle);
     this.currentRate = this.cfg.burstTargetRate;

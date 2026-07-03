@@ -1,10 +1,9 @@
 /**
- * Integration smoke test — connects the env-selected adapter to a RUNNING broker
- * (Iteration 1 stack) and round-trips one message through publish → subscribe.
+ * Integration smoke test — connects the MQTT adapter to a RUNNING broker and
+ * round-trips one message through publish → subscribe.
  *
- * From the WSL host (brokers reachable on localhost):
- *   MQTT : BROKER_TYPE=mqtt  BROKER_HOST=localhost BROKER_PORT=1883  npm run smoke -w @iots/broker
- *   Kafka: BROKER_TYPE=kafka BROKER_HOST=localhost BROKER_PORT=29092 npm run smoke -w @iots/broker
+ * From the WSL host (broker reachable on localhost):
+ *   BROKER_TYPE=mqtt BROKER_HOST=localhost BROKER_PORT=1883 npm run smoke -w @iots/broker
  *
  * Exits 0 on a verified round-trip, 1 on timeout/error.
  */
@@ -33,8 +32,7 @@ async function main(): Promise<void> {
     sent_at_ms: Date.now(),
   });
 
-  // Prime the topic so the consumer never subscribes to a missing topic-partition
-  // (Kafka auto-creates on first produce; harmless for MQTT).
+  // Prime the topic with one publish before subscribing (harmless for MQTT).
   await adapter.publish(config.topic, build());
 
   const roundTrip = new Promise<void>((resolve) => {
@@ -46,8 +44,8 @@ async function main(): Promise<void> {
     }).catch((err) => console.error(`[smoke] subscribe error: ${err instanceof Error ? err.message : err}`));
   });
 
-  // Give the consumer time to join the group / subscription before publishing.
-  await delay(config.type === 'kafka' ? 4000 : 500);
+  // Give the consumer time to establish the subscription before publishing.
+  await delay(500);
 
   // Re-publish periodically to dodge subscription/rebalance races.
   const publisher = setInterval(() => void adapter.publish(config.topic, build()), 750);
