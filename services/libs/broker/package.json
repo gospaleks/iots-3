@@ -1,0 +1,29 @@
+{
+  "name": "@iots/broker",
+  "version": "0.0.0",
+  "private": true,
+  "description": "BrokerAdapter abstraction (mqtt.js / kafkajs) + Nest DI factory keyed on BROKER_TYPE.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --import tsx --test src/broker.module.test.ts",
+    "smoke": "tsx scripts/smoke.ts"
+  },
+  "dependencies": {
+    "@iots/contracts": "*",
+    "kafkajs": "^2.2.4",
+    "mqtt": "^5.10.3",
+    "reflect-metadata": "^0.2.2"
+  },
+  "peerDependencies": {
+    "@nestjs/common": "^10.0.0"
+  },
+  "devDependencies": {
+    "@nestjs/common": "^10.4.15",
+    "@types/node": "^22.10.2",
+    "rxjs": "^7.8.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

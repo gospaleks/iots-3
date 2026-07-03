@@ -1,0 +1,39 @@
+# --- Dataset (large; not committed) ---
+/data/*
+!/data/.gitkeep
+!/data/README.md
+
+# --- Node / NestJS ---
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+
+# --- Python / FastAPI ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# --- Environment files (keep the example) ---
+.env
+**/.env
+!docker/.env.example
+
+# --- Logs / runtime ---
+*.log
+*.pid
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+
+.agents
+skills-lock.json

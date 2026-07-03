@@ -1,0 +1,24 @@
+{
+  "name": "iots2-services",
+  "private": true,
+  "version": "0.0.0",
+  "description": "IoTS Project 2 — NestJS service workspaces (shared libs + services).",
+  "workspaces": [
+    "libs/*",
+    "ingestion-service",
+    "storage-service"
+  ],
+  "scripts": {
+    "build": "npm run build -w @iots/contracts && npm run build -w @iots/broker && npm run build -w ingestion-service && npm run build -w storage-service",
+    "build:libs": "npm run build -w @iots/contracts && npm run build -w @iots/broker",
+    "test": "npm run build -w @iots/contracts && npm run test -w @iots/broker",
+    "smoke": "npm run build -w @iots/contracts && npm run smoke -w @iots/broker",
+    "start:ingestion": "npm run start -w ingestion-service",
+    "start:storage": "npm run start -w storage-service"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

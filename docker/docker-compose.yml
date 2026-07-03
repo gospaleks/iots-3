@@ -1,0 +1,171 @@
+# IoTS Project 2 — unified Docker Compose.
+#
+# Broker stack is chosen by PROFILE, not by a separate compose file:
+#   docker compose --profile mqtt  up -d   # TimescaleDB + Mosquitto
+#   docker compose --profile kafka up -d   # TimescaleDB + Kafka (KRaft)
+#
+# TimescaleDB has no profile -> it is always started with either stack.
+# App services (ingestion/storage/analytics) are added in later iterations.
+#
+# Env values come from ./.env (copy from .env.example). See docs/plan/01-infrastructure.md.
+
+name: iots2
+
+services:
+  # ─────────────────────────── Database (always on) ───────────────────────────
+  timescaledb:
+    image: timescale/timescaledb:2.17.2-pg16
+    container_name: iots-timescaledb
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-iot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-iot}
+      POSTGRES_DB: ${POSTGRES_DB:-iotdb}
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescale-data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-iot} -d ${POSTGRES_DB:-iotdb}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [iot-net]
+
+  # ─────────────────────────── MQTT broker (profile: mqtt) ────────────────────
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: iots-mosquitto
+    profiles: [mqtt]
+    ports:
+      - "1883:1883"   # MQTT
+      - "9001:9001"   # WebSocket
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
+    networks: [iot-net]
+
+  # ─────────────────────────── Kafka broker (profile: kafka) ──────────────────
+  # KRaft mode — no ZooKeeper (REQUIREMENTS §3.2, DECISIONS §4).
+  kafka:
+    image: apache/kafka:3.8.1
+    container_name: iots-kafka
+    profiles: [kafka]
+    ports:
+      - "9092:9092"     # in-network listener (clients use kafka:9092)
+      - "29092:29092"   # host listener (bench tools on the host use localhost:29092)
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,PLAINTEXT_HOST://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: ${KAFKA_NUM_PARTITIONS:-1}
+      CLUSTER_ID: ${KAFKA_CLUSTER_ID:-5L6g3nShT-eMCtK--X86sw}
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks: [iot-net]
+
+  # ─────────────────────────── Dev tooling (profile: tools) ───────────────────
+  # Web UI for inspecting Kafka: topics, partitions, consumer groups, messages,
+  # offsets, lag. DEV-ONLY — kept off the benchmark path via its own profile so
+  # it never competes for resources during measured runs.
+  #   docker compose --profile kafka --profile tools up -d   # → http://localhost:8080
+  # (MQTT has no container here by design — use the external MQTT Explorer desktop
+  #  app pointed at localhost:1883; see docs/notes/02-dev-tooling.md.)
+  kafka-ui:
+    image: ghcr.io/kafbat/kafka-ui:v1.0.0
+    container_name: iots-kafka-ui
+    profiles: [tools]
+    ports:
+      - "${KAFKA_UI_PORT:-8080}:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: iots2
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      DYNAMIC_CONFIG_ENABLED: "true"
+    networks: [iot-net]
+
+  # ─────────────────────────── App services (profile: app) ────────────────────
+  # Broker-agnostic device simulator / publisher. Pair with a broker profile and
+  # set BROKER_TYPE/BROKER_HOST/BROKER_PORT in .env to match:
+  #   MQTT : docker compose --profile mqtt  --profile app up -d   (.env: kafka→mosquitto:1883)
+  #   Kafka: docker compose --profile kafka --profile app up -d   (.env: BROKER_HOST=kafka BROKER_PORT=9092)
+  # Used for Scenarios B & D; Scenarios A/C use the mandated bench tools instead.
+  ingestion:
+    build:
+      context: ../services
+      dockerfile: ingestion-service/Dockerfile
+    image: iots-ingestion:latest
+    container_name: iots-ingestion
+    profiles: [app]
+    env_file: .env
+    environment:
+      CLIENT_ID: iots-ingestion        # stable, distinct broker client id (MQTT)
+      # Overridable per Scenario-B variant (shell env wins over .env at `up` time).
+      QOS_LEVEL: ${QOS_LEVEL:-1}
+      MQTT_CLEAN_SESSION: ${MQTT_CLEAN_SESSION:-true}
+      MQTT_KEEPALIVE_SEC: ${MQTT_KEEPALIVE_SEC:-60}
+    ports:
+      - "${INGESTION_PORT:-3001}:3001"   # control surface: /health /stats POST /burst
+    volumes:
+      - ../data:/data:ro                 # dataset for DATA_SOURCE=replay
+    restart: unless-stopped              # tolerate starting before the broker is ready
+    networks: [iot-net]
+
+  # Broker subscriber → TimescaleDB writer (the only DB writer). Same broker-select
+  # pattern as ingestion (.env BROKER_TYPE/HOST/PORT). WRITE_MODE=BATCH for A/C.
+  storage:
+    build:
+      context: ../services
+      dockerfile: storage-service/Dockerfile
+    image: iots-storage:latest
+    container_name: iots-storage
+    profiles: [app]
+    env_file: .env
+    environment:
+      CLIENT_ID: iots-storage          # stable, distinct broker client id (MQTT)
+      # Overridable per Scenario-B variant. clean:false + a stable CLIENT_ID + QoS>=1
+      # is what lets Mosquitto queue for this subscriber while it is offline.
+      QOS_LEVEL: ${QOS_LEVEL:-1}
+      MQTT_CLEAN_SESSION: ${MQTT_CLEAN_SESSION:-true}
+      MQTT_KEEPALIVE_SEC: ${MQTT_KEEPALIVE_SEC:-60}
+    ports:
+      - "${STORAGE_PORT:-3002}:3002"     # control surface: /health /stats
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    restart: unless-stopped              # tolerate starting before the broker is ready
+    networks: [iot-net]
+
+  # FastAPI tumbling-window analytics (the Python broker-adapter mirror). On Kafka it
+  # joins consumer group B (distinct from storage) so both get the full stream.
+  analytics:
+    build:
+      context: ../services/analytics-service
+    image: iots-analytics:latest
+    container_name: iots-analytics
+    profiles: [app]
+    env_file: .env
+    ports:
+      - "${ANALYTICS_PORT:-3003}:3003"   # control surface: /health /stats
+    restart: unless-stopped              # tolerate starting before the broker is ready
+    networks: [iot-net]
+
+networks:
+  iot-net:
+    driver: bridge
+
+volumes:
+  timescale-data:
+  mosquitto-data:
+  mosquitto-log:
+  kafka-data:

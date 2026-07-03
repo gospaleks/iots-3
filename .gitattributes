@@ -1,0 +1,17 @@
+# Normalize line endings — repo is developed in WSL2 and runs in Linux containers.
+* text=auto eol=lf
+
+# Shell scripts MUST be LF (they run in WSL / Linux containers)
+*.sh text eol=lf
+
+# Windows-only scripts stay CRLF
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Data / binaries
+*.csv text eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gz binary
