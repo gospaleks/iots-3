@@ -79,6 +79,27 @@ developer can resume with zero context. **Commit only when the user asks.**
 
 ## Change log
 
+### Phase 2 — Analytics consumes eKuiper events — 2026-07-07
+- **Repointed Analytics** (`services/analytics-service`) from the raw telemetry topic to
+  `sensors/events`, and **retired the Project 2 tumbling window** (eKuiper owns windowing, D9):
+  deleted `app/window.py`, dropped the window task from `main.py`, and removed the window/threshold
+  metrics from `metrics.py` (now event counters keyed by `event_type`).
+- **Thin orchestrator, no feature logic (D4):** `app/events.py` `EventProcessor` routes each event
+  by `event_type` and keeps a per-device `deque(maxlen=LAG_WINDOWS)` of the **raw** `WINDOW_METRICS`
+  aggregate dicts (forwarded verbatim to MaaS in Phase 5). Event-of-interest types (`HIGH_CO`, and
+  the Phase-6 additions) are logged distinctly.
+- **Contracts/config:** `contracts.py` now mirrors the `sensors/events` payload (retired
+  `SensorMessage`; events are plain dicts since the field set differs per type); the broker adapter
+  yields `(Event, ReceivedMeta)`; `config.py` reads `EVENTS_TOPIC`/`LAG_WINDOWS` (dropped
+  `WINDOW_SIZE_SEC`/`ALERT_THRESHOLD`). `/stats` exposes `bufferDepthByDevice` + `eventsByType`.
+- **Gotcha carried forward:** `sensors/events` has **no `sent_at_ms`**; `ReceivedMeta.received_at_ms`
+  is Analytics' own decision-time stamp (basis for a Phase-5 event-to-alert latency).
+- **Verify:** rebuilt image, ran the full `mqtt+app+cep` stack — Analytics subscribes to
+  `sensors/events`, per-device buffers fill to 4/4 across 100 devices (`/stats` confirms), and
+  `[EVENT] HIGH_CO` lines appear when `CO_HIGH` is temporarily lowered. No P2 window code in the
+  active path. Stack torn down.
+- **Commit (proposed):** `feat(analytics): consume sensors/events, route by type, buffer rollups`
+
 ### Phase 1 — eKuiper CEP (stream + rollup + threshold rule) — 2026-07-07
 - **Added eKuiper to compose** under a new `cep` profile: `ekuiper` (pinned
   `lfedge/ekuiper:2.2.1-slim`, REST on 9081, MQTT source → `tcp://mosquitto:1883`) + a one-shot

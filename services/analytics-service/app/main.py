@@ -1,9 +1,10 @@
-"""FastAPI app: subscribes to the broker, runs a tumbling window, exposes /health /stats.
+"""FastAPI app: subscribes to eKuiper events, routes/buffers them, exposes /health /stats.
 
-Two background tasks share the single asyncio event loop:
-  - consume_loop: pulls (message, meta) from the broker adapter, records transport
-    latency, and feeds the window accumulator.
-  - window.run(): closes a window every WINDOW_SIZE_SEC, logging summaries + alerts.
+Project 3 (Phase 2): Analytics is repointed from the raw telemetry topic to
+`sensors/events`. The Project 2 hand-rolled tumbling window is gone — eKuiper owns
+windowing (D9). A single background task pulls parsed events from the broker adapter
+and hands each to the EventProcessor, which routes by `event_type` and keeps a
+per-device ring buffer of the last LAG_WINDOWS rollups. No ML yet (Phase 5).
 """
 from __future__ import annotations
 
@@ -18,42 +19,38 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .broker.adapter import SubscriberAdapter, create_adapter
 from .config import Config, load_config
+from .events import EventProcessor
 from .metrics import Metrics
-from .window import TumblingWindow
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("analytics")
 
 
-async def consume_loop(adapter: SubscriberAdapter, window: TumblingWindow, metrics: Metrics) -> None:
-    async for msg, meta in adapter.messages():
-        metrics.observe_transport(meta.received_at_ms - msg.sent_at_ms)
-        window.add(msg, meta)
+async def consume_loop(adapter: SubscriberAdapter, processor: EventProcessor) -> None:
+    async for event, meta in adapter.messages():
+        processor.handle(event, meta)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     cfg: Config = app.state.cfg
     metrics = Metrics()
-    window = TumblingWindow(cfg, metrics)
+    processor = EventProcessor(cfg, metrics)
     adapter = create_adapter(cfg)
 
     app.state.metrics = metrics
-    app.state.window = window
+    app.state.processor = processor
 
     log.info(
-        "analytics starting: broker=%s endpoint=%s:%d topic=%s window=%ss threshold=%.1f°F",
-        cfg.broker_type, cfg.host, cfg.port, cfg.topic, cfg.window_size_sec, cfg.alert_threshold,
+        "analytics starting: broker=%s endpoint=%s:%d events_topic=%s lag_windows=%d",
+        cfg.broker_type, cfg.host, cfg.port, cfg.events_topic, cfg.lag_windows,
     )
-    consume_task = asyncio.create_task(consume_loop(adapter, window, metrics))
-    window_task = asyncio.create_task(window.run())
+    consume_task = asyncio.create_task(consume_loop(adapter, processor))
     try:
         yield
     finally:
-        window.stop()
-        for task in (consume_task, window_task):
-            task.cancel()
-        await asyncio.gather(consume_task, window_task, return_exceptions=True)
+        consume_task.cancel()
+        await asyncio.gather(consume_task, return_exceptions=True)
         log.info("analytics stopped")
 
 
@@ -78,11 +75,13 @@ async def health() -> dict:
 @app.get("/stats")
 async def stats() -> dict:
     metrics: Metrics = app.state.metrics
+    processor: EventProcessor = app.state.processor
     cfg: Config = app.state.cfg
     return {
         "broker": cfg.broker_type,
-        "windowSizeSec": cfg.window_size_sec,
-        "alertThreshold": cfg.alert_threshold,
+        "eventsTopic": cfg.events_topic,
+        "lagWindows": cfg.lag_windows,
+        "bufferDepthByDevice": processor.buffer_depths(),
         **metrics.snapshot(),
     }
 

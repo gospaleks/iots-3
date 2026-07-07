@@ -12,14 +12,14 @@
 
 ## Current position
 
-- **Iteration:** Phase 1 complete → ready for Phase 2.
-- **Next action:** **Start Phase 2** (`docs/phases/PHASE-2-analytics-events.md`) — rewire Analytics
-  to consume `sensors/events`. Phase 3 (MaaS training) is independent and may run in parallel.
-- **Last action:** Phase 1 — stood up eKuiper (`lfedge/ekuiper:2.2.1-slim`, `cep` profile) with a
-  typed `sensor_stream` + env-templated **rollup** (`WINDOW_METRICS`) and **threshold** (`HIGH_CO`)
-  rules, provisioned reproducibly via REST (`ekuiper/provision.sh`). Verified both event types on
-  `sensors/events`; confirmed the WINDOW_TYPE switch works with no SQL edits.
-- **Branch:** `main` (Phase-0 committed by user; Phase-1 changes uncommitted).
+- **Iteration:** Phase 2 complete → ready for Phase 3.
+- **Next action:** **Start Phase 3** (`docs/phases/PHASE-3-maas-training.md`) — offline `train.py`
+  (independent; could also have been done in parallel). Then Phase 4/5.
+- **Last action:** Phase 2 — rewired Analytics from the raw topic to `sensors/events`: retired the
+  P2 tumbling window, route by `event_type`, per-device ring buffer of the last `LAG_WINDOWS`
+  rollups, distinct logging. Verified live: buffers fill to 4/4 across 100 devices, `/stats` shows
+  depths, `[EVENT] HIGH_CO` observed.
+- **Branch:** `main` (Phases 0–1 committed/pushed by user; Phase-2 changes uncommitted).
 
 ---
 
@@ -29,7 +29,7 @@
 |-------|------|--------|-------|
 | 0 | Foundation & shared contracts | ✅ DONE | P2 base E2E verified (57.8k rows, 100 devices); wire=°C; contracts+thresholds+env keys frozen |
 | 1 | eKuiper CEP (stream + rollup + threshold rule) | ✅ DONE | `2.2.1-slim`; tumbling/ss/10; WINDOW_METRICS+HIGH_CO via REST; window switch verified |
-| 2 | Analytics consumes events | ⬜ NOT STARTED | drop P2 window; route by event_type; buffer rollups |
+| 2 | Analytics consumes events | ✅ DONE | subscribes `sensors/events`; per-device buffer 4/4; `/stats` depths; HIGH_CO logged; no ML yet |
 | 3 | MaaS offline training | ⬜ NOT STARTED | shared features.py; chrono split; RF; metrics; artifact |
 | 4 | MaaS service | ⬜ NOT STARTED | FastAPI /predict /health /model/info; Dockerize |
 | 5 | Analytics ↔ MaaS integration | ⬜ NOT STARTED | REST + timeout/fallback; [PREDICTIVE ALERT]; Socket.IO event/alert + REST snapshots |
@@ -82,6 +82,14 @@ Legend: ⬜ NOT STARTED · 🟨 IN PROGRESS · ✅ DONE · ⛔ BLOCKED
 
 ## Change log (newest first)
 
+- **2026-07-07** — Phase 2 done: rewired the FastAPI Analytics service to consume `sensors/events`.
+  `config.py` now reads `EVENTS_TOPIC`/`LAG_WINDOWS` (dropped `WINDOW_SIZE_SEC`/`ALERT_THRESHOLD`);
+  `contracts.py` mirrors the event payload (retired `SensorMessage`); the broker adapter yields raw
+  event dicts; new `app/events.py` `EventProcessor` routes by `event_type` and keeps a per-device
+  `deque(maxlen=LAG_WINDOWS)` of rollups; `metrics.py` counts events by type; `main.py` dropped the
+  window task; deleted `app/window.py`. `/stats` exposes `bufferDepthByDevice` + `eventsByType`.
+  Verified live end-to-end (buffers 4/4 × 100 devices, `[EVENT] HIGH_CO` when threshold lowered).
+  Next → Phase 3.
 - **2026-07-07** — Phase 1 done: added `ekuiper` + one-shot `ekuiper-provision` services to
   compose under a new `cep` profile (pinned `lfedge/ekuiper:2.2.1-slim`). Authored the typed
   `ekuiper/streams/sensor_stream.json` (ts as FLOAT to avoid silent NULLs on fractional epoch

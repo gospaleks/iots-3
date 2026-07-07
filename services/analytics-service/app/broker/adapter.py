@@ -1,9 +1,10 @@
 """Broker abstraction — the Python mirror of @iots/broker's SubscriberAdapter.
 
 Analytics is subscribe-only. The adapter exposes a single async generator that
-yields (SensorMessage, ReceivedMeta) pairs; the factory keyed on BROKER_TYPE is the
-one place that constructs it (mirrors createBrokerAdapter in TS). Project 3 is
-MQTT-only; the abstraction is kept so a second broker could slot back in cleanly.
+yields (Event, ReceivedMeta) pairs, where Event is the parsed `sensors/events` JSON
+object; the factory keyed on BROKER_TYPE is the one place that constructs it
+(mirrors createBrokerAdapter in TS). Project 3 is MQTT-only; the abstraction is kept
+so a second broker could slot back in cleanly.
 """
 from __future__ import annotations
 
@@ -12,7 +13,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 
 from ..config import Config
-from ..contracts import ReceivedMeta, SensorMessage
+from ..contracts import Event, ReceivedMeta
 
 
 def now_ms() -> int:
@@ -21,8 +22,8 @@ def now_ms() -> int:
 
 class SubscriberAdapter(ABC):
     @abstractmethod
-    def messages(self) -> AsyncIterator[tuple[SensorMessage, ReceivedMeta]]:
-        """Connect, subscribe, and yield parsed messages until cancelled.
+    def messages(self) -> AsyncIterator[tuple[Event, ReceivedMeta]]:
+        """Connect, subscribe, and yield parsed events until cancelled.
 
         Implementations reconnect on transient broker errors; cancellation
         (shutdown) propagates out cleanly to disconnect.

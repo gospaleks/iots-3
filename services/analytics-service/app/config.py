@@ -1,10 +1,15 @@
-"""Environment-driven config (mirrors the per-service env tables in REQUIREMENTS §5.3)."""
+"""Environment-driven config (mirrors the per-service env tables in REQUIREMENTS §5.3).
+
+Project 3: Analytics consumes eKuiper output on `sensors/events` (not the raw telemetry
+topic) and keeps the last `LAG_WINDOWS` rollups per device. eKuiper owns windowing (D9),
+so the Project 2 tumbling-window / alert-threshold knobs are gone.
+"""
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
 
-from .contracts import MQTT_TOPIC
+from .contracts import EVENTS_TOPIC
 
 
 @dataclass(slots=True)
@@ -12,10 +17,9 @@ class Config:
     broker_type: str
     host: str
     port: int
-    topic: str
+    events_topic: str
     qos: int  # MQTT only
-    window_size_sec: float
-    alert_threshold: float
+    lag_windows: int
     http_port: int
 
 
@@ -29,9 +33,8 @@ def load_config(env: os._Environ | dict | None = None) -> Config:
         broker_type=broker_type,
         host=env.get("BROKER_HOST", "mosquitto"),
         port=int(env.get("BROKER_PORT", "1883")),
-        topic=env.get("TOPIC", MQTT_TOPIC),
+        events_topic=env.get("EVENTS_TOPIC", EVENTS_TOPIC),
         qos=int(env.get("QOS_LEVEL", "1")),
-        window_size_sec=float(env.get("WINDOW_SIZE_SEC", "10")),
-        alert_threshold=float(env.get("ALERT_THRESHOLD", "50.0")),
+        lag_windows=int(env.get("LAG_WINDOWS", "4")),
         http_port=int(env.get("ANALYTICS_PORT", "3003")),
     )
