@@ -106,6 +106,47 @@ services:
     restart: unless-stopped              # tolerate starting before the broker is ready
     networks: [iot-net]
 
+  # ─────────────────────────── eKuiper CEP (profile: cep) ─────────────────────
+  # Streaming/CEP engine: subscribes to sensors/telemetry, applies SQL rules
+  # (rollup + threshold), sinks tagged events to sensors/events. Rules are
+  # provisioned reproducibly via the REST API by the one-shot job below — never
+  # hand-created in the UI. Pinned tag (no :latest).
+  ekuiper:
+    image: lfedge/ekuiper:2.2.1-slim
+    container_name: iots-ekuiper
+    profiles: [cep]
+    environment:
+      MQTT_SOURCE__DEFAULT__SERVER: "tcp://mosquitto:1883"
+      KUIPER__BASIC__CONSOLELOG: "true"
+    ports:
+      - "9081:9081"                      # REST management API
+    depends_on: [mosquitto]
+    restart: unless-stopped
+    networks: [iot-net]
+
+  # One-shot init: waits for the eKuiper REST API, then creates the stream and
+  # POSTs the env-templated rules. Exits 0 when done; re-runnable (idempotent).
+  ekuiper-provision:
+    image: curlimages/curl:8.8.0
+    container_name: iots-ekuiper-provision
+    profiles: [cep]
+    depends_on: [ekuiper]
+    volumes:
+      - ../ekuiper:/ekuiper:ro
+    entrypoint: ["/bin/sh", "/ekuiper/provision.sh"]
+    environment:
+      EKUIPER_URL: "http://ekuiper:9081"
+      RAW_TOPIC: "${TOPIC:-sensors/telemetry}"
+      EVENTS_TOPIC: "${EVENTS_TOPIC:-sensors/events}"
+      BROKER_URL: "tcp://mosquitto:1883"
+      WINDOW_TYPE: "${WINDOW_TYPE:-tumbling}"
+      WINDOW_UNIT: "${WINDOW_UNIT:-ss}"
+      WINDOW_SIZE: "${WINDOW_SIZE:-10}"
+      WINDOW_STEP: "${WINDOW_STEP:-}"
+      CO_HIGH: "${CO_HIGH:-0.010}"
+    restart: on-failure
+    networks: [iot-net]
+
 networks:
   iot-net:
     driver: bridge

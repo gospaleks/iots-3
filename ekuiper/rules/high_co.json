@@ -1,0 +1,7 @@
+{
+  "id": "high_co",
+  "sql": "SELECT device, co, temp, ts, 'HIGH_CO' AS event_type FROM sensor_stream WHERE co > __CO_HIGH__",
+  "actions": [
+    { "mqtt": { "server": "__BROKER_URL__", "topic": "__EVENTS_TOPIC__", "sendSingle": true } }
+  ]
+}

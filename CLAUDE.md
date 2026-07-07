@@ -79,6 +79,26 @@ developer can resume with zero context. **Commit only when the user asks.**
 
 ## Change log
 
+### Phase 1 — eKuiper CEP (stream + rollup + threshold rule) — 2026-07-07
+- **Added eKuiper to compose** under a new `cep` profile: `ekuiper` (pinned
+  `lfedge/ekuiper:2.2.1-slim`, REST on 9081, MQTT source → `tcp://mosquitto:1883`) + a one-shot
+  `ekuiper-provision` (`curlimages/curl`) that provisions everything via REST and exits. Bring the
+  full stack up with `docker compose --profile mqtt --profile app --profile cep up -d` (note: every
+  compose command now needs the profile flags, since `ekuiper` `depends_on: mosquitto`).
+- **Stream + rules** (`ekuiper/`): typed `sensor_stream` over `sensors/telemetry` (`ts` as **FLOAT**
+  — fractional epoch seconds would silently NULL under BIGINT); a continuous **rollup**
+  `window_metrics` (`WINDOW_METRICS`, no HAVING, emits every window) and a per-message **threshold**
+  `high_co` (`HIGH_CO`, `co > CO_HIGH`). Both sink to `sensors/events` with `sendSingle: true`.
+- **`provision.sh`** waits for the REST API, builds the `GROUP BY` window clause from env (D6:
+  `WINDOW_TYPE/UNIT/SIZE/STEP`), creates the stream **if missing** (a running rule pins the stream,
+  so drop-and-recreate fails), and DELETE-then-POSTs each rule — fully idempotent/re-runnable.
+- **Verify:** fresh `up` auto-provisions stream + 2 rules (no UI clicks); `WINDOW_METRICS` flows at
+  ~10s cadence with the full aggregate schema and `HIGH_CO` fires when co crosses threshold (proven
+  by temporarily lowering `CO_HIGH` to 0.004 — the default 0.010 isn't crossed by the current replay
+  sample); rule counters climb with 0 exceptions; switching `WINDOW_TYPE` (tumbling→sliding) changes
+  emission with no SQL edits. `window_start/end` are epoch-**ms** integers (eKuiper native).
+- **Commit (proposed):** `feat(ekuiper): add CEP stream + rollup/threshold rules provisioned via REST`
+
 ### Phase 0 — Foundation & shared contracts — 2026-07-07
 - **Verified the reused P2 base runs end-to-end on Docker** (the pending item after Kafka
   removal): `docker compose --profile mqtt --profile app up -d` → Ingestion publishing 1000 msg/s

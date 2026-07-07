@@ -12,13 +12,14 @@
 
 ## Current position
 
-- **Iteration:** Phase 0 complete → ready for Phase 1.
-- **Next action:** **Start Phase 1** (`docs/phases/PHASE-1-ekuiper-cep.md`). Phase 3 (MaaS
-  training) is independent and may run in parallel.
-- **Last action:** Phase 0 — verified P2 base runs end-to-end on Docker, confirmed wire unit is
-  Celsius, froze shared contracts (`shared/message-contract.md` + new `shared/thresholds.md`),
-  added P3 env keys to `docker/.env.example`.
-- **Branch:** `main` @ `2cc18f3` (Phase-0 doc/env changes uncommitted; clean MQTT-only base).
+- **Iteration:** Phase 1 complete → ready for Phase 2.
+- **Next action:** **Start Phase 2** (`docs/phases/PHASE-2-analytics-events.md`) — rewire Analytics
+  to consume `sensors/events`. Phase 3 (MaaS training) is independent and may run in parallel.
+- **Last action:** Phase 1 — stood up eKuiper (`lfedge/ekuiper:2.2.1-slim`, `cep` profile) with a
+  typed `sensor_stream` + env-templated **rollup** (`WINDOW_METRICS`) and **threshold** (`HIGH_CO`)
+  rules, provisioned reproducibly via REST (`ekuiper/provision.sh`). Verified both event types on
+  `sensors/events`; confirmed the WINDOW_TYPE switch works with no SQL edits.
+- **Branch:** `main` (Phase-0 committed by user; Phase-1 changes uncommitted).
 
 ---
 
@@ -27,7 +28,7 @@
 | Phase | Name | Status | Notes |
 |-------|------|--------|-------|
 | 0 | Foundation & shared contracts | ✅ DONE | P2 base E2E verified (57.8k rows, 100 devices); wire=°C; contracts+thresholds+env keys frozen |
-| 1 | eKuiper CEP (stream + rollup + threshold rule) | ⬜ NOT STARTED | env-templated window; provision via REST |
+| 1 | eKuiper CEP (stream + rollup + threshold rule) | ✅ DONE | `2.2.1-slim`; tumbling/ss/10; WINDOW_METRICS+HIGH_CO via REST; window switch verified |
 | 2 | Analytics consumes events | ⬜ NOT STARTED | drop P2 window; route by event_type; buffer rollups |
 | 3 | MaaS offline training | ⬜ NOT STARTED | shared features.py; chrono split; RF; metrics; artifact |
 | 4 | MaaS service | ⬜ NOT STARTED | FastAPI /predict /health /model/info; Dockerize |
@@ -70,12 +71,25 @@ Legend: ⬜ NOT STARTED · 🟨 IN PROGRESS · ✅ DONE · ⛔ BLOCKED
 - [x] **E2E on a Docker host** (done Phase 0): full `--profile mqtt --profile app` stack came up
       clean — Storage wrote 57.8k rows across 100 devices, Analytics emitted window/[INFO]/[LATENCY]
       lines, **no Kafka errors**.
-- [ ] Decide final `lfedge/ekuiper` pinned tag in Phase 1 (verify current 2.x-slim at build time).
+- [x] eKuiper tag pinned (Phase 1): **`lfedge/ekuiper:2.2.1-slim`** (verified on Docker Hub, pulled).
+- **Carry to Phase 2:** `window_start`/`window_end` are emitted as **epoch-ms integers** (eKuiper
+  native), not the fractional-seconds shown in the contract example — Analytics/chart must treat
+  them as ms. `HIGH_CO` (per-message co>threshold) does **not** fire on the current replay sample
+  (raw co ~0.003–0.005 < 0.010); wiring proven by temporarily lowering the threshold. Consider
+  re-tuning `CO_HIGH` or relying on the Phase-6 windowed rules for demoable events.
 
 ---
 
 ## Change log (newest first)
 
+- **2026-07-07** — Phase 1 done: added `ekuiper` + one-shot `ekuiper-provision` services to
+  compose under a new `cep` profile (pinned `lfedge/ekuiper:2.2.1-slim`). Authored the typed
+  `ekuiper/streams/sensor_stream.json` (ts as FLOAT to avoid silent NULLs on fractional epoch
+  seconds), rollup rule `window_metrics.json` (`WINDOW_METRICS`, no HAVING) and threshold rule
+  `high_co.json` (`HIGH_CO`), plus `ekuiper/provision.sh` — waits for REST, builds the GROUP BY
+  window clause from env (D6), create-if-missing stream, DELETE-then-POST rules (idempotent).
+  Verified: auto-provision on `up`, both event types on `sensors/events`, counters climbing (0
+  exceptions), tumbling→sliding switch with no SQL edits. Next → Phase 2.
 - **2026-07-07** — Phase 0 done: verified the reused P2 base runs end-to-end on Docker
   (Storage → TimescaleDB 57.8k rows/100 devices, Analytics window logs, no Kafka errors);
   confirmed the wire unit is **Celsius** (no conversion); extended `shared/message-contract.md`
