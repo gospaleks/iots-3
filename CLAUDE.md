@@ -79,6 +79,23 @@ developer can resume with zero context. **Commit only when the user asks.**
 
 ## Change log
 
+### Phase 0 — Foundation & shared contracts — 2026-07-07
+- **Verified the reused P2 base runs end-to-end on Docker** (the pending item after Kafka
+  removal): `docker compose --profile mqtt --profile app up -d` → Ingestion publishing 1000 msg/s
+  to `sensors/telemetry`, Storage subscribed and writing to TimescaleDB (57.8k rows, 100 devices,
+  BATCH mode), Analytics emitting P2 window `[INFO]`/`[LATENCY]` lines. **No Kafka errors.**
+- **Confirmed the wire unit is Celsius** (D5): raw `temp` 19.7/24.4/22.1, DB `temp` min 0.1 /
+  max 28.3 / avg 22.35. Ingestion does no conversion ⇒ `train.py` needs none. The Analytics
+  `°F` log suffix is a cosmetic P2 mislabel (removed when Analytics is rewired in Phase 2).
+- **Froze shared contracts:** extended `shared/message-contract.md` with the `sensors/events`
+  payload, the Socket.IO enriched-alert payload, and the MaaS `POST /predict` REST contract +
+  parity notes; added `shared/thresholds.md` (°C-calibrated thresholds + window/feature constants).
+- **Added P3 env keys** to `docker/.env.example` (window, thresholds, `EVENTS_TOPIC`, MaaS URL/
+  timeout, `LAG_WINDOWS`, Socket.IO CORS, `MODEL_PATH`/`MAAS_PORT`) — declared, not yet wired.
+- **Verify:** `docker compose --profile mqtt --profile app config` parses with the new keys; stack
+  torn down cleanly. `SESSION_STATE.md` written back (Phase 0 → ✅, E2E + wire-unit items ticked).
+- **Commit (proposed):** `docs(phase-0): freeze shared contracts + P3 env keys; verify P2 base E2E`
+
 ### Iteration 0 — Repo init: prune Project 2 → clean MQTT-only Project 3 base — 2026-07-03
 - **Deleted all standalone Project-2-only artifacts:** `benchmarks/`, `results/`, `dashboard/`,
   `docker/kafka/`, and all P2 docs (`docs/REQUIREMENTS.md`, `docs/DECISIONS.md`, `docs/report.md`,

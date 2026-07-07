@@ -12,10 +12,13 @@
 
 ## Current position
 
-- **Iteration:** planning complete → implementation not started.
-- **Next action:** **Start Phase 0** (`docs/phases/PHASE-0-foundation-contracts.md`).
-- **Last action:** Locked D1–D11, recalibrated thresholds to real °C ranges, wrote the phased plan.
-- **Branch:** `main` @ `6a4448d` (clean MQTT-only base; see `docs/REPO-STATE-2026-07-05_1522.md`).
+- **Iteration:** Phase 0 complete → ready for Phase 1.
+- **Next action:** **Start Phase 1** (`docs/phases/PHASE-1-ekuiper-cep.md`). Phase 3 (MaaS
+  training) is independent and may run in parallel.
+- **Last action:** Phase 0 — verified P2 base runs end-to-end on Docker, confirmed wire unit is
+  Celsius, froze shared contracts (`shared/message-contract.md` + new `shared/thresholds.md`),
+  added P3 env keys to `docker/.env.example`.
+- **Branch:** `main` @ `2cc18f3` (Phase-0 doc/env changes uncommitted; clean MQTT-only base).
 
 ---
 
@@ -23,7 +26,7 @@
 
 | Phase | Name | Status | Notes |
 |-------|------|--------|-------|
-| 0 | Foundation & shared contracts | ⬜ NOT STARTED | verify P2 base runs; commit topics/env/contracts |
+| 0 | Foundation & shared contracts | ✅ DONE | P2 base E2E verified (57.8k rows, 100 devices); wire=°C; contracts+thresholds+env keys frozen |
 | 1 | eKuiper CEP (stream + rollup + threshold rule) | ⬜ NOT STARTED | env-templated window; provision via REST |
 | 2 | Analytics consumes events | ⬜ NOT STARTED | drop P2 window; route by event_type; buffer rollups |
 | 3 | MaaS offline training | ⬜ NOT STARTED | shared features.py; chrono split; RF; metrics; artifact |
@@ -61,15 +64,23 @@ Legend: ⬜ NOT STARTED · 🟨 IN PROGRESS · ✅ DONE · ⛔ BLOCKED
 
 ## Open items / risks carried forward
 
-- [ ] **Wire-unit check (Phase 1):** confirm Ingestion publishes °C. If it converts to °F,
-      add the identical conversion in `train.py` and re-baseline thresholds.
-- [ ] **E2E on a Docker host still pending** (P2 base was not re-run after Kafka removal — see
-      REPO-STATE §9). Fold this verification into Phase 0.
+- [x] **Wire-unit check** (done Phase 0): Ingestion publishes **°C** with no conversion — raw
+      wire 19.7/24.4/22.1, DB `temp` min 0.1 / max 28.3 / avg 22.35. No `train.py` conversion
+      needed. (Analytics P2 log still prints a cosmetic `°F` suffix — removed in Phase 2.)
+- [x] **E2E on a Docker host** (done Phase 0): full `--profile mqtt --profile app` stack came up
+      clean — Storage wrote 57.8k rows across 100 devices, Analytics emitted window/[INFO]/[LATENCY]
+      lines, **no Kafka errors**.
 - [ ] Decide final `lfedge/ekuiper` pinned tag in Phase 1 (verify current 2.x-slim at build time).
 
 ---
 
 ## Change log (newest first)
 
+- **2026-07-07** — Phase 0 done: verified the reused P2 base runs end-to-end on Docker
+  (Storage → TimescaleDB 57.8k rows/100 devices, Analytics window logs, no Kafka errors);
+  confirmed the wire unit is **Celsius** (no conversion); extended `shared/message-contract.md`
+  with the `sensors/events` / alert / MaaS REST contracts; added `shared/thresholds.md`; added
+  the P3 env keys (window/thresholds/MaaS/Socket.IO) to `docker/.env.example`. `docker compose
+  config` parses. Next → Phase 1.
 - **2026-07-05** — Planning iteration: locked D1–D11; recalibrated thresholds; authored
   `IMPLEMENTATION_PLAN.md`, this tracker, and `docs/phases/PHASE-0..8`.
