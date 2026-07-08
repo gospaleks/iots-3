@@ -1,0 +1,7 @@
+# MaaS training + serving deps. Versions pinned so the artifact trained here unpickles
+# under the exact same scikit-learn at serve time (Phase 4) — train/serve parity.
+# features.py itself is pure stdlib; train.py reads the CSV with the stdlib csv module
+# (no pandas needed). FastAPI/uvicorn are added in Phase 4 for the service.
+scikit-learn==1.5.2
+numpy==2.1.3
+joblib==1.4.2

@@ -35,13 +35,15 @@ ingestion (NestJS) ──publish sensors/telemetry──▶ Mosquitto (MQTT) ─
 - **storage** — the only DB writer; subscribes to `sensors/telemetry`, tracks `seq` integrity,
   writes to a TimescaleDB hypertable (`DIRECT`/`BATCH`, idempotent `ON CONFLICT`). *(reused)*
 - **eKuiper** — LF Edge stream/CEP engine; SQL rules over `sensors/telemetry` detect events →
-  publishes them to `sensors/events`. *(new — later iteration)*
-- **analytics** — FastAPI; consumes `sensors/events`, calls MaaS `/predict`, emits enriched
-  `[ALERT]`/`[INFO]`. *(modified — later iteration)*
-- **MaaS** — Python + FastAPI; a trained model (regression/classification on the time series)
-  behind `POST /predict`, `GET /health`, `GET /model/info`. *(new — later iteration)*
+  publishes them to `sensors/events`. *(new — ✅ built, Phase 1)*
+- **analytics** — FastAPI; consumes `sensors/events`, buffers per-device rollups, (soon) calls
+  MaaS `/predict` and emits enriched predictive alerts. *(modified — ✅ consuming events, Phase 2;
+  MaaS call lands in Phase 5)*
+- **MaaS** — Python + FastAPI; a RandomForest next-window temperature forecaster behind
+  `POST /predict`, `GET /health`, `GET /model/info`. *(new — 🟨 model trained Phase 3; REST
+  service in Phase 4)*
 - **web app** — visualizes CEP events, predictive alerts, and MaaS predictions. Non-blocking.
-  *(new — later iteration)*
+  *(new — ⬜ Phase 7)*
 
 The reused services depend only on a broker `BrokerAdapter` interface (Nest DI for the two
 NestJS services, an async mirror in the Python analytics service). Project 3 is MQTT-only.
@@ -55,28 +57,28 @@ NestJS services, an async mirror in the Python analytics service). Project 3 is 
 | TimescaleDB | **Reused** | Historical store; offline MaaS training source; optional web-app source. |
 | Mosquitto (MQTT) | **Reused** | The message backbone. |
 | Message contract | **Reused** | `shared/message-contract.md` — eKuiper stream + MaaS features derive from it. |
-| Analytics Service (FastAPI) | **Modified** | Consume `sensors/events` + call MaaS REST → enriched alerts. |
-| eKuiper (Streaming/CEP) | **New** | SQL rules → `sensors/events`. |
-| MaaS (Model-as-a-Service) | **New** | Trained ML model behind REST. |
-| Web app | **New** | CEP events + predictions + alerts viewer. |
+| Analytics Service (FastAPI) | **Modified** — ✅ Phase 2 | Consumes `sensors/events`, routes by type, buffers rollups. MaaS call in Phase 5. |
+| eKuiper (Streaming/CEP) | **New** — ✅ Phase 1 | `WINDOW_METRICS` rollup + `HIGH_CO` threshold → `sensors/events`, REST-provisioned. |
+| MaaS (Model-as-a-Service) | **New** — 🟨 Phase 3/4 | RandomForest forecaster trained (R²=0.988); REST service in Phase 4. |
+| Web app | **New** — ⬜ Phase 7 | CEP events + predictions + alerts viewer. |
 
 ## Repository layout
 
 ```
 docs/         REQUIREMENTS-IoTS-3.md (source of truth), IoTS-3-EXPLAINED.md, HANDOFF-repo-init-cleanup.md
 data/         dataset CSV (gitignored) — MaaS training data
-shared/       message-contract.md, dataset_info.md
+shared/       message-contract.md, dataset_info.md, thresholds.md
 services/     npm workspaces: libs/{broker,contracts}, ingestion-service, storage-service, analytics-service (FastAPI)
-docker/       docker-compose.yml (mqtt/app profiles), mosquitto/, db/init.sql, .env.example
-maas/         NEW — MaaS model service + train.py (placeholder; built later)
-ekuiper/      NEW — stream + rule definitions + provision.sh (placeholder; built later)
-webapp/       NEW — web app (placeholder; built later)
+docker/       docker-compose.yml (mqtt/app/cep profiles), mosquitto/, db/init.sql, .env.example
+maas/         features.py (shared transform), train.py, models/ (trained artifact + metrics); REST service in Phase 4
+ekuiper/      streams/ + rules/ + provision.sh — REST-provisioned CEP layer (Phase 1)
+webapp/       web app (placeholder; Phase 7)
 ```
 
 ## Tech stack
 
 NestJS (mqtt.js, TypeORM) · FastAPI (aiomqtt) · TimescaleDB · Eclipse Mosquitto · LF Edge
-eKuiper *(coming)* · scikit-learn / FastAPI MaaS *(coming)* · Docker Compose.
+eKuiper (`2.2.1-slim`) · scikit-learn / FastAPI MaaS · Docker Compose.
 
 ---
 
@@ -95,27 +97,34 @@ cp docker/.env.example docker/.env          # BROKER_TYPE=mqtt
 cd services && npm install && npm run build && npm test    # broker unit tests
 ```
 
-## Running the reused MQTT pipeline (available today)
+## Running the pipeline
 
 The compose stack uses **profiles**: `timescaledb` is always on, `mqtt` adds Mosquitto,
-`app` adds the three reused services.
+`app` adds the three reused services, `cep` adds eKuiper + its one-shot provisioner.
 
 ```bash
 C="docker compose -f docker/docker-compose.yml"
 
 # Broker only:
-$C --profile mqtt up -d                     # TimescaleDB + Mosquitto
+$C --profile mqtt up -d                                   # TimescaleDB + Mosquitto
 
-# Full reused pipeline (ingestion + storage + analytics):
+# Reused pipeline (ingestion + storage + analytics):
 $C --profile mqtt --profile app up -d
 
+# + eKuiper CEP (analytics then consumes sensors/events):
+$C --profile mqtt --profile app --profile cep up -d
+
 # Tear down (add -v to wipe volumes):
-$C --profile mqtt --profile app down
+$C --profile mqtt --profile app --profile cep down
 ```
 
-> **Coming in later iterations:** `ekuiper`, `maas`, the Analytics enhancement, and `webapp`
-> will be added to compose so `docker compose up` brings up the full CEP + ML pipeline. This
-> README's run section will grow with them.
+> eKuiper `depends_on: mosquitto`, so once you add `--profile cep` **every** compose command for
+> the stack needs the profile flags. See [ekuiper/README.md](ekuiper/README.md) for provisioning,
+> inspection, and the env-templated window.
+
+> **Coming in later iterations:** the `maas` REST service (Phase 4), the Analytics→MaaS enrichment
+> + Socket.IO push (Phase 5), and `webapp` (Phase 7) will be added under `ml`/`web` profiles so
+> `docker compose up` brings up the full CEP + ML pipeline. This run section will grow with them.
 
 ### Service control surface (HTTP)
 
@@ -123,7 +132,7 @@ $C --profile mqtt --profile app down
 |---------|------|-----------|
 | ingestion | 3001 | `GET /health`, `GET /stats`, `POST /burst?durationSec=N` |
 | storage   | 3002 | `GET /health`, `GET /stats` (received, stored, conflicts, `seq` integrity, transport latency) |
-| analytics | 3003 | `GET /health`, `GET /stats` (windows, alerts, latency) |
+| analytics | 3003 | `GET /health`, `GET /stats` (events by type, per-device rollup buffer depth) |
 
 ```bash
 curl -s localhost:3002/stats | python3 -m json.tool      # storage integrity + latency
@@ -146,9 +155,9 @@ BROKER_TYPE=mqtt BROKER_HOST=localhost BROKER_PORT=1883 npm run smoke -w @iots/b
 |-----|---------|
 | [docs/REQUIREMENTS-IoTS-3.md](docs/REQUIREMENTS-IoTS-3.md) | **Source of truth** — what to build (eKuiper, MaaS, enhanced Analytics, web app). |
 | [docs/IoTS-3-EXPLAINED.md](docs/IoTS-3-EXPLAINED.md) | The plain-English explainer + build recipes (eKuiper deep-dive, MaaS choices). |
-| [docs/HANDOFF-repo-init-cleanup.md](docs/HANDOFF-repo-init-cleanup.md) | The repo-init cleanup contract (this iteration). |
-| [shared/message-contract.md](shared/message-contract.md) · [shared/dataset_info.md](shared/dataset_info.md) | Payload/topics · dataset schema. |
-| [CLAUDE.md](CLAUDE.md) · [SESSION-STATE.md](SESSION-STATE.md) | Project reference + change log · session handoff for the next developer. |
+| [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) · [docs/phases/](docs/phases/) | Phased roadmap + per-phase build docs (0–8). |
+| [shared/message-contract.md](shared/message-contract.md) · [shared/dataset_info.md](shared/dataset_info.md) · [shared/thresholds.md](shared/thresholds.md) | Payload/topics · dataset schema · °C thresholds + window/feature constants. |
+| [CLAUDE.md](CLAUDE.md) · [SESSION_STATE.md](SESSION_STATE.md) | Project reference + change log · session handoff for the next developer. |
 
 ## License / context
 

@@ -79,6 +79,30 @@ developer can resume with zero context. **Commit only when the user asks.**
 
 ## Change log
 
+### Phase 3 — MaaS offline training — 2026-07-08
+- **`maas/features.py` — the single shared transform** (imported verbatim by `train.py` now and the
+  service in Phase 4; train/serve skew is the #1 MaaS bug). `windows_from_readings` buckets raw
+  readings into `WINDOW_SIZE`-second aggregates (same schema as the eKuiper rollup);
+  `feature_vector` builds the **19-feature** input (4-lag `avg_temp`/`avg_humidity`/`avg_co`, latest
+  `max_temp`, rolling mean/std of `avg_temp`, trend, 3-device one-hot). `base_device()` strips the
+  ingestion `-N` suffix so training (bare MACs) and serving (`MAC-N`) share one one-hot.
+- **`maas/train.py`:** loads the CSV with the stdlib `csv` module (no pandas), drops `temp==0`
+  dropout rows (7), builds per-device aggregate series, slides `LAG_WINDOWS` to form
+  (X, y=next-window `avg_temp`), does a **per-device chronological 70/15/15 split** (no shuffle)
+  then concatenates, fits `RandomForestRegressor`, reports **MAE/RMSE/R² on val+test**, and dumps
+  `model.joblib` + `metrics.json` + `model_meta.json`.
+- **Artifact size gotcha:** unbounded RF trees memorized every sample → a **737 MB** artifact that
+  also overfit. Bounding (`max_depth=16, min_samples_leaf=25, n_estimators=150`) + `compress=3`
+  gives a **14 MB** artifact that generalizes better: **test** MAE 0.073 / RMSE 0.420 / **R² 0.988**
+  (val R² 0.985). Celsius; `WINDOW_SIZE=10s`, `LAG_WINDOWS=4`, version 1.0.
+- **Verify:** trained in a container off the local `iots-analytics` image (host has no sklearn;
+  Docker Hub pulls hit a WSL2 credential-helper glitch); model loads with `n_features_in_=19`
+  matching `FEATURE_NAMES`, and a `feature_vector`→`predict` smoke test returns a sensible 25.56 °C.
+- **Repo policy:** `model.joblib` is gitignored (build output, ships in the image — Phase 4); the
+  small `metrics.json`/`model_meta.json` are kept for review. Also corrected the stale "Fahrenheit"
+  label in `shared/dataset_info.md` (Celsius, per Phase 0).
+- **Commit (proposed):** `feat(maas): offline train.py + shared features.py (RF, chrono split, metrics)`
+
 ### Phase 2 — Analytics consumes eKuiper events — 2026-07-07
 - **Repointed Analytics** (`services/analytics-service`) from the raw telemetry topic to
   `sensors/events`, and **retired the Project 2 tumbling window** (eKuiper owns windowing, D9):

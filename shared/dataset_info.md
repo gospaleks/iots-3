@@ -33,7 +33,7 @@
 | `lpg`        | `FLOAT8`      | number    | ppm                                |
 | `motion`     | `BOOLEAN`     | bool      |                                    |
 | `smoke`      | `FLOAT8`      | number    | ppm                                |
-| `temp`       | `FLOAT8`      | number    | Fahrenheit                         |
+| `temp`       | `FLOAT8`      | number    | **Celsius** (verified Phase 0; earlier "Fahrenheit" was a mislabel) |
 | `seq`        | `BIGINT`      | number    | **added** — per-device counter     |
 | `sent_at_ms` | `BIGINT`      | number    | **added** — send time (epoch ms)   |
 
@@ -43,8 +43,11 @@
 
 ## Alert thresholds (§2.6)
 
+> Project 3 recalibrated these to real °C ranges and moved them into eKuiper CEP rules —
+> see [thresholds.md](thresholds.md) for the canonical, env-driven values.
+
 | Metric | Default        |
 |--------|----------------|
-| `temp` | > 50 °F        |
-| `co`   | configurable   |
-| `smoke`| configurable   |
+| `temp` | `TEMP_HIGH=28.0` °C |
+| `co`   | `CO_HIGH=0.010` |
+| `smoke`| `SMOKE_HIGH=0.030` |

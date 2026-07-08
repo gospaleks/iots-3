@@ -3,9 +3,11 @@
 !/data/.gitkeep
 !/data/README.md
 
-# --- MaaS model artifacts (built by maas/train.py; uncomment when they exist) ---
-# maas/models/*.joblib
-# maas/models/*.keras
+# --- MaaS model artifacts (built by maas/train.py) ---
+# The serialized model is a build output (ships in the image). The small JSON
+# metadata (metrics.json, model_meta.json) is kept for review/report.
+maas/models/*.joblib
+maas/models/*.keras
 
 # --- Node / NestJS ---
 node_modules/

@@ -12,14 +12,15 @@
 
 ## Current position
 
-- **Iteration:** Phase 2 complete → ready for Phase 3.
-- **Next action:** **Start Phase 3** (`docs/phases/PHASE-3-maas-training.md`) — offline `train.py`
-  (independent; could also have been done in parallel). Then Phase 4/5.
-- **Last action:** Phase 2 — rewired Analytics from the raw topic to `sensors/events`: retired the
-  P2 tumbling window, route by `event_type`, per-device ring buffer of the last `LAG_WINDOWS`
-  rollups, distinct logging. Verified live: buffers fill to 4/4 across 100 devices, `/stats` shows
-  depths, `[EVENT] HIGH_CO` observed.
-- **Branch:** `main` (Phases 0–1 committed/pushed by user; Phase-2 changes uncommitted).
+- **Iteration:** Phase 3 complete → ready for Phase 4.
+- **Next action:** **Start Phase 4** (`docs/phases/PHASE-4-maas-service.md`) — wrap the trained
+  model in FastAPI (`/predict` `/health` `/model/info`), import `features.py` verbatim, Dockerize,
+  add to compose. Then Phase 5 (Analytics ↔ MaaS).
+- **Last action:** Phase 3 — authored `maas/features.py` (single shared transform), `maas/train.py`
+  (chrono 70/15/15 split, RandomForest, dropped 7 `temp==0` rows), `maas/requirements.txt`. Trained:
+  **test MAE 0.073 / RMSE 0.420 / R² 0.988** (val R² 0.985). Bounded trees + `compress=3` → 14 MB
+  artifact. Load + `feature_vector` smoke test green (19 features).
+- **Branch:** `main` (Phases 0–2 committed/pushed by user; Phase-3 changes uncommitted).
 
 ---
 
@@ -30,7 +31,7 @@
 | 0 | Foundation & shared contracts | ✅ DONE | P2 base E2E verified (57.8k rows, 100 devices); wire=°C; contracts+thresholds+env keys frozen |
 | 1 | eKuiper CEP (stream + rollup + threshold rule) | ✅ DONE | `2.2.1-slim`; tumbling/ss/10; WINDOW_METRICS+HIGH_CO via REST; window switch verified |
 | 2 | Analytics consumes events | ✅ DONE | subscribes `sensors/events`; per-device buffer 4/4; `/stats` depths; HIGH_CO logged; no ML yet |
-| 3 | MaaS offline training | ⬜ NOT STARTED | shared features.py; chrono split; RF; metrics; artifact |
+| 3 | MaaS offline training | ✅ DONE | shared `features.py`; chrono split; RF (test R²=0.988, MAE=0.073°C); 14 MB artifact + meta |
 | 4 | MaaS service | ⬜ NOT STARTED | FastAPI /predict /health /model/info; Dockerize |
 | 5 | Analytics ↔ MaaS integration | ⬜ NOT STARTED | REST + timeout/fallback; [PREDICTIVE ALERT]; Socket.IO event/alert + REST snapshots |
 | 6 | eKuiper advanced rules | ⬜ NOT STARTED | sustained-high + heat/dry correlation |
@@ -82,6 +83,17 @@ Legend: ⬜ NOT STARTED · 🟨 IN PROGRESS · ✅ DONE · ⛔ BLOCKED
 
 ## Change log (newest first)
 
+- **2026-07-08** — Phase 3 done: offline MaaS training. `maas/features.py` is the **single** feature
+  transform (imported by train + service): `windows_from_readings` (bucket raw readings into
+  WINDOW_SIZE=10s aggregates) + `feature_vector` (19 features: 4-lag avg_temp/avg_humidity/avg_co,
+  latest max_temp, rolling mean/std, trend, 3-device one-hot) with `base_device()` stripping the
+  ingestion `-N` suffix so train (bare MACs) and serve (suffixed) share the one-hot. `train.py`:
+  drop `temp==0` (7 rows), per-device chronological 70/15/15 split (no shuffle) then concat,
+  RandomForest(n_estimators=150, max_depth=16, min_samples_leaf=25) — bounded to keep the artifact
+  14 MB (`compress=3`); unbounded trees ballooned to 737 MB **and** overfit. Metrics saved to
+  `models/metrics.json` + `models/model_meta.json`: **val** MAE 0.058 / RMSE 0.369 / R² 0.985;
+  **test** MAE 0.073 / RMSE 0.420 / R² 0.988. Verified via load + predict smoke test in the
+  container (no host sklearn). `model.joblib` gitignored; the JSON meta is kept. Next → Phase 4.
 - **2026-07-07** — Phase 2 done: rewired the FastAPI Analytics service to consume `sensors/events`.
   `config.py` now reads `EVENTS_TOPIC`/`LAG_WINDOWS` (dropped `WINDOW_SIZE_SEC`/`ALERT_THRESHOLD`);
   `contracts.py` mirrors the event payload (retired `SensorMessage`); the broker adapter yields raw
