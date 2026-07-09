@@ -40,8 +40,8 @@ ingestion (NestJS) ──publish sensors/telemetry──▶ Mosquitto (MQTT) ─
   MaaS `/predict` and emits enriched predictive alerts. *(modified — ✅ consuming events, Phase 2;
   MaaS call lands in Phase 5)*
 - **MaaS** — Python + FastAPI; a RandomForest next-window temperature forecaster behind
-  `POST /predict`, `GET /health`, `GET /model/info`. *(new — 🟨 model trained Phase 3; REST
-  service in Phase 4)*
+  `POST /predict`, `GET /health`, `GET /model/info`. *(new — ✅ Phases 3–4; the artifact ships
+  in the image, loaded once at startup)*
 - **web app** — visualizes CEP events, predictive alerts, and MaaS predictions. Non-blocking.
   *(new — ⬜ Phase 7)*
 
@@ -59,7 +59,7 @@ NestJS services, an async mirror in the Python analytics service). Project 3 is 
 | Message contract | **Reused** | `shared/message-contract.md` — eKuiper stream + MaaS features derive from it. |
 | Analytics Service (FastAPI) | **Modified** — ✅ Phase 2 | Consumes `sensors/events`, routes by type, buffers rollups. MaaS call in Phase 5. |
 | eKuiper (Streaming/CEP) | **New** — ✅ Phase 1 | `WINDOW_METRICS` rollup + `HIGH_CO` threshold → `sensors/events`, REST-provisioned. |
-| MaaS (Model-as-a-Service) | **New** — 🟨 Phase 3/4 | RandomForest forecaster trained (R²=0.988); REST service in Phase 4. |
+| MaaS (Model-as-a-Service) | **New** — ✅ Phase 3/4 | RandomForest forecaster (test R²=0.988) behind FastAPI `/predict /health /model/info`; artifact ships in image. |
 | Web app | **New** — ⬜ Phase 7 | CEP events + predictions + alerts viewer. |
 
 ## Repository layout
@@ -100,13 +100,14 @@ cd services && npm install && npm run build && npm test    # broker unit tests
 ## Running the pipeline
 
 The compose stack uses **profiles**: `timescaledb` is always on, `mqtt` adds Mosquitto,
-`app` adds the three reused services, `cep` adds eKuiper + its one-shot provisioner.
+`app` adds the three reused services, `cep` adds eKuiper + its one-shot provisioner,
+`ml` adds MaaS.
 
 ```bash
 C="docker compose -f docker/docker-compose.yml"
 
 # Broker only:
-$C --profile mqtt up -d                                   # TimescaleDB + Mosquitto
+$C --profile mqtt up -d                                             # TimescaleDB + Mosquitto
 
 # Reused pipeline (ingestion + storage + analytics):
 $C --profile mqtt --profile app up -d
@@ -114,17 +115,21 @@ $C --profile mqtt --profile app up -d
 # + eKuiper CEP (analytics then consumes sensors/events):
 $C --profile mqtt --profile app --profile cep up -d
 
+# + MaaS (POST /predict wraps the trained forecaster):
+$C --profile mqtt --profile app --profile cep --profile ml up -d
+
 # Tear down (add -v to wipe volumes):
-$C --profile mqtt --profile app --profile cep down
+$C --profile mqtt --profile app --profile cep --profile ml down
 ```
 
 > eKuiper `depends_on: mosquitto`, so once you add `--profile cep` **every** compose command for
 > the stack needs the profile flags. See [ekuiper/README.md](ekuiper/README.md) for provisioning,
-> inspection, and the env-templated window.
+> inspection, and the env-templated window. See [maas/README.md](maas/README.md) for the REST
+> contract and Swagger UI at [`http://localhost:8000/docs`](http://localhost:8000/docs).
 
-> **Coming in later iterations:** the `maas` REST service (Phase 4), the Analytics→MaaS enrichment
-> + Socket.IO push (Phase 5), and `webapp` (Phase 7) will be added under `ml`/`web` profiles so
-> `docker compose up` brings up the full CEP + ML pipeline. This run section will grow with them.
+> **Coming in later iterations:** the Analytics→MaaS enrichment + Socket.IO push (Phase 5) and
+> `webapp` (Phase 7) will be added under a `web` profile so `docker compose up` brings up the
+> full CEP + ML + UI pipeline. This run section will grow with them.
 
 ### Service control surface (HTTP)
 
@@ -133,11 +138,13 @@ $C --profile mqtt --profile app --profile cep down
 | ingestion | 3001 | `GET /health`, `GET /stats`, `POST /burst?durationSec=N` |
 | storage   | 3002 | `GET /health`, `GET /stats` (received, stored, conflicts, `seq` integrity, transport latency) |
 | analytics | 3003 | `GET /health`, `GET /stats` (events by type, per-device rollup buffer depth) |
+| maas      | 8000 | `GET /health`, `GET /model/info`, `POST /predict`, `GET /docs` (Swagger) |
 
 ```bash
 curl -s localhost:3002/stats | python3 -m json.tool      # storage integrity + latency
 curl -s localhost:3003/stats | python3 -m json.tool      # analytics stats
 curl -s -X POST 'localhost:3001/burst?durationSec=10'    # trigger a burst
+curl -s localhost:8000/model/info | python3 -m json.tool # MaaS model card
 ```
 
 ## Tests

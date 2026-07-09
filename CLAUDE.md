@@ -37,9 +37,9 @@ data/            dataset CSV (GITIGNORED) — MaaS training data
 shared/          dataset_info.md, message-contract.md (canonical payload + topic names)
 services/        npm workspaces: libs/{broker,contracts}, ingestion-service, storage-service, analytics-service (FastAPI)
 docker/          docker-compose.yml (mqtt/app profiles), mosquitto/, db/init.sql, .env.example
-maas/            NEW — MaaS model service + train.py (placeholder; built later)
-ekuiper/         NEW — stream + rule definitions + provision.sh (placeholder; built later)
-webapp/          NEW — web app (placeholder; built later)
+maas/            NEW — features.py (shared transform), train.py, app.py (FastAPI /predict), Dockerfile, models/
+ekuiper/         NEW — streams/, rules/, provision.sh (REST-provisioned CEP layer)
+webapp/          NEW — web app (placeholder; Phase 7)
 ```
 
 ## Conventions
@@ -78,6 +78,34 @@ developer can resume with zero context. **Commit only when the user asks.**
 ---
 
 ## Change log
+
+### Phase 4 — MaaS FastAPI service — 2026-07-09
+- **`maas/app.py` — FastAPI wrapper.** `lifespan` handler loads `MODEL_PATH` + `model_meta.json`
+  **once** at startup and stores them on `app.state`; **no training at boot** (Phase 4 acceptance).
+  Pydantic models (`HistoryWindow`, `PredictRequest`, `PredictResponse`) give a free Swagger UI at
+  `/docs` for the demo. Endpoints match `shared/message-contract.md`: `GET /health` →
+  `{"status":"ok"}`, `GET /model/info` → task/algorithm/features/lag_windows/window_size_sec/metrics/
+  trained_at/version (from `model_meta.json`), `POST /predict` → `{prediction,target,unit,device,model_version}`.
+- **`feature_vector` imported verbatim from `features.py`** — the single shared transform (D4). No
+  parallel feature code in the service; the #1 MaaS bug (train/serve skew) can't happen.
+- **Fail-fast parity guard at startup:** raises if `model.n_features_in_ != len(FEATURE_NAMES)` or
+  `model_meta.lag_windows != LAG_WINDOWS`. A silent drift breaks the demo, not startup.
+- **Validation → 400, never 500** (Phase 4 §3.2): wrong `history` length or unknown `device`
+  (base MAC not in `DEVICES` after stripping ingestion `-N`) return `HTTPException(400)` with a
+  clear detail. Verified: valid → 26.70 °C; `history` length 3 → 400; unknown MAC → 400;
+  suffixed device `1c:bf:ce:15:ec:4d-27` → same 26.70 °C as bare (proves `base_device()`).
+- **`maas/Dockerfile`** — `python:3.12-slim`, requirements pinned (`fastapi==0.115.6`,
+  `uvicorn[standard]==0.34.0` added). **Artifact ships in the image**: `COPY models/model.joblib
+  model_meta.json metrics.json /models/` matches the `.env` default `MODEL_PATH=/models/model.joblib`
+  so no env override is needed. Shell-form `CMD uvicorn app:app --host 0.0.0.0 --port ${MAAS_PORT}`
+  so the env var expands. `.dockerignore` keeps `train.py` + `__pycache__` out of the image.
+- **Compose:** new **`ml` profile** with the `maas` service (`iots-maas:latest`, port 8000; env:
+  `MODEL_PATH`/`MODEL_META_PATH`/`MAAS_PORT`/`LAG_WINDOWS`/`WINDOW_SIZE`/`CORS_ORIGINS`).
+  Full pipeline is now `--profile mqtt --profile app --profile cep --profile ml up -d`.
+- **Verify:** `docker compose --profile ml build maas` clean; startup log
+  `model ready | version=1.0 features=19 lag_windows=4 window_size_sec=10`; all three endpoints
+  respond as expected; container torn down between steps.
+- **Commit (proposed):** `feat(maas): FastAPI /predict /health /model/info + Dockerfile (ml profile)`
 
 ### Phase 3 — MaaS offline training — 2026-07-08
 - **`maas/features.py` — the single shared transform** (imported verbatim by `train.py` now and the

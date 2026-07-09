@@ -49,11 +49,13 @@ in the image. Add it to Docker Compose under an `ml` profile.
 - `docker/docker-compose.yml` (+ `maas`, profile `ml`)
 
 ## 5. Acceptance criteria (exit gate)
-- [ ] `docker compose --profile ml up maas` starts; `/health` returns ok.
-- [ ] `POST /predict` with a valid `LAG_WINDOWS`-length history returns a numeric `prediction` in °C.
-- [ ] `/model/info` reports task/algorithm/metrics/version.
-- [ ] Model is loaded once (log line at startup); no training happens at boot.
-- [ ] Feature building uses `features.py` (same as `train.py`).
+- [x] `docker compose --profile ml up maas` starts; `/health` returns ok.
+- [x] `POST /predict` with a valid `LAG_WINDOWS`-length history returns a numeric `prediction` in °C.
+      *(sample from the message contract → 26.70 °C)*
+- [x] `/model/info` reports task/algorithm/metrics/version. *(returns full `model_meta.json` incl. val + test)*
+- [x] Model is loaded once (log line at startup); no training happens at boot.
+      *(`lifespan` handler; `2026-07-09 21:36:08 INFO maas: model ready | version=1.0 features=19 lag_windows=4 window_size_sec=10`)*
+- [x] Feature building uses `features.py` (same as `train.py`). *(direct import — no shim)*
 
 ## 6. How to verify
 ```bash

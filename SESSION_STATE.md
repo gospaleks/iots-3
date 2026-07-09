@@ -12,15 +12,21 @@
 
 ## Current position
 
-- **Iteration:** Phase 3 complete → ready for Phase 4.
-- **Next action:** **Start Phase 4** (`docs/phases/PHASE-4-maas-service.md`) — wrap the trained
-  model in FastAPI (`/predict` `/health` `/model/info`), import `features.py` verbatim, Dockerize,
-  add to compose. Then Phase 5 (Analytics ↔ MaaS).
-- **Last action:** Phase 3 — authored `maas/features.py` (single shared transform), `maas/train.py`
-  (chrono 70/15/15 split, RandomForest, dropped 7 `temp==0` rows), `maas/requirements.txt`. Trained:
-  **test MAE 0.073 / RMSE 0.420 / R² 0.988** (val R² 0.985). Bounded trees + `compress=3` → 14 MB
-  artifact. Load + `feature_vector` smoke test green (19 features).
-- **Branch:** `main` (Phases 0–2 committed/pushed by user; Phase-3 changes uncommitted).
+- **Iteration:** Phase 4 complete → ready for Phase 5.
+- **Next action:** **Start Phase 5** (`docs/phases/PHASE-5-analytics-maas-integration.md`) —
+  wire Analytics → MaaS REST (`POST /predict`) with a small timeout + CEP-only fallback;
+  emit `[PREDICTIVE ALERT]` on event-of-interest types; mount a Socket.IO server on the
+  Analytics ASGI app that pushes `event` + `alert` channels + REST snapshot routes for the
+  web app. **Core E2E done at the end of Phase 5.**
+- **Last action:** Phase 4 — authored `maas/app.py` (FastAPI + Pydantic; lifespan loads model
+  ONCE; `/health` `/model/info` `/predict`; 400 on wrong history length / unknown device;
+  parity check on startup vs `FEATURE_NAMES`/`LAG_WINDOWS`), `maas/Dockerfile` (python:3.12-slim,
+  ships artifact in the image), bumped `requirements.txt` (+ fastapi, uvicorn), added `maas`
+  service to compose under **`ml` profile** (port 8000). Verified live: `/health` ok,
+  `/model/info` returns full meta (task/algorithm/features/metrics/version), `/predict` valid
+  → 26.70 °C, wrong length → 400, unknown device → 400, suffixed device (`-27`) → same
+  prediction as bare (base_device() normalization confirmed).
+- **Branch:** `main` (Phases 0–2 committed/pushed by user; Phase-3 + Phase-4 changes uncommitted).
 
 ---
 
@@ -32,7 +38,7 @@
 | 1 | eKuiper CEP (stream + rollup + threshold rule) | ✅ DONE | `2.2.1-slim`; tumbling/ss/10; WINDOW_METRICS+HIGH_CO via REST; window switch verified |
 | 2 | Analytics consumes events | ✅ DONE | subscribes `sensors/events`; per-device buffer 4/4; `/stats` depths; HIGH_CO logged; no ML yet |
 | 3 | MaaS offline training | ✅ DONE | shared `features.py`; chrono split; RF (test R²=0.988, MAE=0.073°C); 14 MB artifact + meta |
-| 4 | MaaS service | ⬜ NOT STARTED | FastAPI /predict /health /model/info; Dockerize |
+| 4 | MaaS service | ✅ DONE | FastAPI (lifespan load-once); /health /model/info /predict; 400 handling; Dockerized under `ml` profile |
 | 5 | Analytics ↔ MaaS integration | ⬜ NOT STARTED | REST + timeout/fallback; [PREDICTIVE ALERT]; Socket.IO event/alert + REST snapshots |
 | 6 | eKuiper advanced rules | ⬜ NOT STARTED | sustained-high + heat/dry correlation |
 | 7 | Web app (React+Vite) | ⬜ NOT STARTED | MQTT-WS; feeds + predicted-vs-actual chart |
@@ -83,6 +89,23 @@ Legend: ⬜ NOT STARTED · 🟨 IN PROGRESS · ✅ DONE · ⛔ BLOCKED
 
 ## Change log (newest first)
 
+- **2026-07-09** — Phase 4 done: MaaS FastAPI service. `maas/app.py` uses the FastAPI
+  `lifespan` handler to `joblib.load(MODEL_PATH)` and read `model_meta.json` **once** at
+  startup (no training at boot); parity guard fails fast if `model.n_features_in_` disagrees
+  with `len(FEATURE_NAMES)` or `meta.lag_windows != LAG_WINDOWS`. Pydantic models
+  (`HistoryWindow`, `PredictRequest`, `PredictResponse`) power the free `/docs` Swagger UI.
+  Validation returns 400 (never 500) for wrong `history` length or an unknown device
+  (`base_device()` strips the ingestion `-N` suffix — the suffixed id `1c:bf:ce:15:ec:4d-27`
+  produces the same prediction as the bare MAC). `/predict` calls
+  `feature_vector(history, device)` from the shared `features.py` verbatim (D4). `maas/Dockerfile`
+  (python:3.12-slim, requirements pinned, artifact copied to `/models/` to match the `.env`
+  default `MODEL_PATH=/models/model.joblib`) ships the model IN the image; `.dockerignore`
+  keeps `train.py` and pycache out. Added `maas` compose service under new **`ml` profile**
+  (port 8000, respects `.env` MAAS_PORT/MODEL_PATH/LAG_WINDOWS/CORS_ORIGINS). Live smoke:
+  `/health` → ok; `/model/info` returns full meta incl. `metrics.val/test` and `trained_at`;
+  `POST /predict` on the message-contract example returns `prediction: 26.70 °C`, `unit:"C"`,
+  `model_version:"1.0"`. Compose header + phase table say bring up with
+  `--profile mqtt --profile app --profile cep --profile ml up -d`. Next → Phase 5.
 - **2026-07-08** — Phase 3 done: offline MaaS training. `maas/features.py` is the **single** feature
   transform (imported by train + service): `windows_from_readings` (bucket raw readings into
   WINDOW_SIZE=10s aggregates) + `feature_vector` (19 features: 4-lag avg_temp/avg_humidity/avg_co,

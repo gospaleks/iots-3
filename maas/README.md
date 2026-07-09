@@ -9,15 +9,17 @@ Background: [docs/REQUIREMENTS-IoTS-3.md §6.2](../docs/REQUIREMENTS-IoTS-3.md),
 
 ## Status
 
-- ✅ **Phase 3 — offline training** (this README): `features.py`, `train.py`, artifact + metrics.
-- ⬜ **Phase 4 — the FastAPI service** (`/predict` `/health` `/model/info`) + Dockerfile: not built yet.
+- ✅ **Phase 3 — offline training**: `features.py`, `train.py`, artifact + metrics.
+- ✅ **Phase 4 — the FastAPI service** (`/predict` `/health` `/model/info`) + Dockerfile + compose `ml` profile.
 
 ## Layout
 
 ```
-features.py          THE shared feature transform (imported by train.py AND the service)
+features.py          THE shared feature transform (imported by train.py AND app.py)
 train.py             offline training: CSV → RandomForest artifact + metrics
-requirements.txt     scikit-learn / numpy / joblib (pinned; FastAPI added in Phase 4)
+app.py               FastAPI service: /health /model/info /predict — loads model ONCE at startup
+Dockerfile           python:3.12-slim; ships the artifact IN the image (no training at boot)
+requirements.txt     scikit-learn / numpy / joblib / fastapi / uvicorn (pinned)
 models/              build outputs — model.joblib (gitignored), metrics.json, model_meta.json
 ```
 
@@ -69,3 +71,35 @@ val + test → dump artifact + `metrics.json` + `model_meta.json`.
 loaded once at startup, never trained at boot. `metrics.json` / `model_meta.json` are small and
 kept in git for review. Bounding tree growth + `compress=3` keeps the artifact ~14 MB (unbounded
 trees ballooned to ~700 MB **and** overfit).
+
+## Serve (Phase 4)
+
+Build and run the MaaS container (must be trained first — Phase 3):
+
+```bash
+docker compose -f docker/docker-compose.yml --profile ml build maas
+docker compose -f docker/docker-compose.yml --profile ml up -d maas
+
+curl -s localhost:8000/health                    # {"status":"ok"}
+curl -s localhost:8000/model/info | jq           # task/algorithm/features/metrics/version
+curl -s -X POST localhost:8000/predict \
+  -H 'Content-Type: application/json' \
+  -d '{"device":"1c:bf:ce:15:ec:4d","history":[
+    {"avg_temp":25.1,"avg_humidity":42.0,"avg_co":0.0060,"max_temp":26.0},
+    {"avg_temp":25.6,"avg_humidity":41.5,"avg_co":0.0064,"max_temp":26.4},
+    {"avg_temp":25.9,"avg_humidity":41.1,"avg_co":0.0068,"max_temp":26.9},
+    {"avg_temp":26.1,"avg_humidity":41.2,"avg_co":0.0071,"max_temp":27.4}]}' | jq
+# → { "prediction": 26.70, "target": "next_window_avg_temp", "unit": "C", ... }
+```
+
+Free Swagger UI at [`http://localhost:8000/docs`](http://localhost:8000/docs) — try `/predict` from the browser during the demo.
+
+Validation guarantees (`400` — never `500`):
+
+- history length must equal `LAG_WINDOWS` (currently 4).
+- device (after stripping the ingestion `-N` suffix via `base_device()`) must be one of the three dataset MACs.
+
+Startup guarantees:
+
+- Model + `model_meta.json` loaded **once** at process startup (lifespan handler); no training at boot.
+- Fails fast if `model.n_features_in_ ≠ len(FEATURE_NAMES)` or if `model_meta.lag_windows ≠ LAG_WINDOWS` (parity break).

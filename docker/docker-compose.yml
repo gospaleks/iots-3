@@ -1,11 +1,13 @@
 # IoTS Project 3 — MQTT-only Docker Compose.
 #
 # Profiles:
-#   docker compose --profile mqtt up -d              # TimescaleDB + Mosquitto
-#   docker compose --profile mqtt --profile app up -d # + ingestion/storage/analytics
+#   docker compose --profile mqtt up -d                                      # TimescaleDB + Mosquitto
+#   docker compose --profile mqtt --profile app up -d                        # + ingestion/storage/analytics
+#   docker compose --profile mqtt --profile app --profile cep up -d          # + eKuiper CEP
+#   docker compose --profile mqtt --profile app --profile cep --profile ml up -d  # + MaaS
 #
 # TimescaleDB has no profile -> it is always started.
-# eKuiper, MaaS and the web app are added in later Project 3 iterations.
+# The web app is added in Phase 7.
 #
 # Env values come from ./.env (copy from .env.example).
 
@@ -104,6 +106,29 @@ services:
     ports:
       - "${ANALYTICS_PORT:-3003}:3003"   # control surface: /health /stats
     restart: unless-stopped              # tolerate starting before the broker is ready
+    networks: [iot-net]
+
+  # ─────────────────────────── MaaS (profile: ml) ─────────────────────────────
+  # Model-as-a-Service (Phase 4): FastAPI wrapper over the RandomForest artifact
+  # trained offline in Phase 3. Loads model once at startup, exposes /predict,
+  # /health, /model/info. Stateless — no broker, no DB. Analytics is the only
+  # client (Phase 5). Artifact ships IN the image (Dockerfile COPY).
+  maas:
+    build:
+      context: ../maas
+    image: iots-maas:latest
+    container_name: iots-maas
+    profiles: [ml]
+    environment:
+      MODEL_PATH: "${MODEL_PATH:-/models/model.joblib}"
+      MODEL_META_PATH: "${MODEL_META_PATH:-/models/model_meta.json}"
+      MAAS_PORT: "${MAAS_PORT:-8000}"
+      LAG_WINDOWS: "${LAG_WINDOWS:-4}"
+      WINDOW_SIZE: "${WINDOW_SIZE:-10}"
+      CORS_ORIGINS: "${CORS_ORIGINS:-*}"
+    ports:
+      - "${MAAS_PORT:-8000}:8000"
+    restart: unless-stopped
     networks: [iot-net]
 
   # ─────────────────────────── eKuiper CEP (profile: cep) ─────────────────────
