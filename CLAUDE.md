@@ -79,6 +79,129 @@ developer can resume with zero context. **Commit only when the user asks.**
 
 ## Change log
 
+### Phase 8 — Delivery: E2E gate + README + objasnjenje.md — 2026-07-12
+- **Full pipeline on one command:** `docker compose -f docker/docker-compose.yml --profile mqtt
+  --profile app --profile cep --profile ml --profile web up -d` → 9 containers healthy
+  (timescaledb, mosquitto, ingestion, storage, analytics, ekuiper, ekuiper-provision, maas,
+  webapp), all provisioning REST-driven (zero eKuiper UI clicks on a fresh clone).
+- **E2E verified from a clean `down` → `up` cycle:** eKuiper 4/4 rules `running` (window_metrics
+  + high_co + sustained_high_temp + heat_drying); Analytics buffers reach 4/4 across all 100
+  simulated devices in ~30s; `[PREDICTIVE ALERT] device=1c:bf:ce:15:ec:4d-82 eKuiper=
+  SUSTAINED_HIGH_TEMP (avg 25.6°C) | MaaS=next 27.6°C | pre-emptive` streaming in Analytics logs;
+  ring buffer of 200 SUSTAINED_HIGH_TEMP alerts populated; webapp HTTP 200 with live event
+  feed / alert cards / predicted-vs-actual chart rendering.
+- **`objasnjenje.md`** authored at repo root — Serbian, mapped point-by-point to the
+  professor's project task (1a eKuiper CEP, 1b MaaS REST, 2 CEP subscription+republish,
+  3 Python+FastAPI+scikit-learn, 4 Docker+web app, 5 GitHub+per-service description). Includes
+  architecture diagram, per-microservice paragraphs, parity invariants, an elevator-pitch
+  ("šta reći na odbrani"), and a documentation-trace table for follow-up questions.
+- **README (root)** updated with the full 5-profile compose command, `webapp` (port 8080)
+  and `maas` (port 8000 + Swagger `/docs`) in the Service control surface table, and the
+  MaaS model card summary.
+- **Commit (proposed):** `feat(iots3): complete Phases 5–8 — MaaS integration, advanced CEP, web app, delivery`
+
+### Phase 7 — Web app (React + Vite + Tailwind + Socket.IO + Recharts) — 2026-07-12
+- **Stack (locked in the phase doc, delivered):** React 18 + Vite 6 + TypeScript + Tailwind
+  CSS 3 + TanStack Query 5 + axios + socket.io-client 4 + Recharts 2. Scaffolded by hand
+  (no `create-vite` in a container, cleaner for reproducibility). All configs pinned.
+- **Data layer:** `api.ts` (axios client + `connectSocket()` helper + typed `CepEvent` /
+  `EnrichedAlert` / `ForecastPoint`). **`useLiveStreams` hook** seeds `events` + `alerts`
+  React state from TanStack Query snapshots (`/api/events`, `/api/alerts`) then subscribes
+  the `socket.io-client` to `event` + `alert` channels and appends into rolling caps
+  (200 events / 100 alerts) so unbounded growth isn't a demo footgun.
+- **Views (Tailwind, no shadcn/ui shortcut):** `StatusBar` (Socket.IO connected pill +
+  device count), `DeviceSelector`, **`EventFeed`** (rolling table color-coded by
+  event_type — WINDOW_METRICS muted, HIGH_CO amber, SUSTAINED_HIGH_TEMP/HEAT_DRYING red),
+  **`AlertFeed`** (cards showing actual/forecast temps + `[PREDICTIVE ALERT]` line +
+  "forecast vX.Y" badge or "CEP-only" fallback), **`ForecastChart`** (Recharts LineChart:
+  white solid `actual_avg_temp` from WINDOW_METRICS + blue-dashed `forecast_next_avg_temp`
+  from alerts, merged by ts).
+- **Dockerized:** multi-stage build — `node:22-alpine` builder → `nginx:1.27-alpine`
+  runtime with `nginx.conf` (SPA fallback, gzip). `VITE_API_URL` baked at build time via
+  compose `args:` (default `http://localhost:3003`, overridable with `WEBAPP_API_URL`).
+  New **`web` profile** — port 8080 → nginx :80. **Non-blocking (D10)**: nothing
+  `depends_on` webapp; pipeline runs fine when it's stopped.
+- **Verified in the Browser pane:** `Socket.IO connected` pill green; devices dropdown
+  lists all 100 simulated device ids; event feed streaming HIGH_CO rows; predictive alert
+  cards showing `actual = 25.6°C · forecast = 25.5°C` with `forecast v1.0` badge; chart
+  renders forecast dot for the selected device.
+- **Commit (proposed part of):** `feat(iots3): complete Phases 5–8 — MaaS integration, advanced CEP, web app, delivery`
+
+### Phase 6 — eKuiper advanced rules (SUSTAINED_HIGH_TEMP + HEAT_DRYING) — 2026-07-12
+- **Two new rules** wired the same reproducible way as Phase 1 (JSON template →
+  `provision.sh` sed-substitutes env values → DELETE-then-POST via REST):
+  - **`ekuiper/rules/sustained_high_temp.json`** — windowed aggregation with `HAVING`:
+    `GROUP BY device, __WIN__ HAVING AVG(temp) > __SUSTAINED_TEMP__`. Emits the full
+    rollup shape (avg_temp/max/min/humidity/co/lpg/smoke + sample_count + window_start/end)
+    so Analytics can enrich without re-buffering. Default `SUSTAINED_TEMP=25.0` catches
+    `1c:bf:ce:15:ec:4d` (avg ~26.5°C) but leaves the other two devices below.
+  - **`ekuiper/rules/heat_drying.json`** — multi-condition correlation:
+    `HAVING AVG(temp) > __TEMP_HIGH__ AND AVG(humidity) < __HUMIDITY_LOW__` — the classic
+    "genuine CEP" example beyond a single filter (default TEMP_HIGH=28, HUMIDITY_LOW=40).
+    On this dataset it stays quiet at defaults (humidity stays ~60 avg) — wiring proven
+    by temporarily loosening thresholds via REST during test.
+- **`provision.sh`:** added `SUSTAINED_TEMP`, `TEMP_HIGH`, `HUMIDITY_LOW` env reads and
+  matching `sed -e` substitutions inside `provision_rule()`; added two more
+  `provision_rule` calls at the end. Idempotent — re-runs the same way as before.
+- **`docker-compose.yml`:** `ekuiper-provision` now passes those three env vars from `.env`.
+- **Verified on fresh boot:** `GET /rules` shows all four with `status: "running"`;
+  `mosquitto_sub -t sensors/events` shows `SUSTAINED_HIGH_TEMP` events flowing at
+  window cadence for `1c:bf:ce:15:ec:4d-*` devices; Analytics feeds them through the
+  Phase-5 enrichment path (`[PREDICTIVE ALERT] ... SUSTAINED_HIGH_TEMP (avg 25.6°C) |
+  MaaS=next 27.6°C | pre-emptive`).
+- **Commit (proposed part of):** `feat(iots3): complete Phases 5–8 — MaaS integration, advanced CEP, web app, delivery`
+
+### Phase 5 — Analytics ↔ MaaS integration + Socket.IO + REST snapshots — 2026-07-12
+- **Analytics is now the orchestrator (D9).** Full rewrite of `events.py` to be async and
+  route non-`WINDOW_METRICS` events through `_enrich_and_emit()`; new `maas_client.py` and
+  `socketio_server.py` modules; new REST snapshot routes; ASGI wraps FastAPI with Socket.IO
+  so `/socket.io`, `/api/*`, `/health`, `/stats` all share port 3003.
+- **`maas_client.py`:** async `httpx.AsyncClient(base_url=MAAS_URL, timeout=MAAS_TIMEOUT_MS/1000)`.
+  `predict(device, history)` builds the exact §MaaS-REST payload (device + list of the 4
+  `_PREDICT_FIELDS` per window) and POSTs `/predict`. **Any failure returns `None`** — the
+  three narrow branches (timeout, HTTPStatusError, HTTPError) log a `WARNING`; a defensive
+  catch-all logs and still returns None. **The subscribe loop must never stall** — this is
+  the entire point of the Phase-5 resilience acceptance.
+- **`socketio_server.py`:** `SioBus` wraps `socketio.AsyncServer(async_mode="asgi",
+  cors_allowed_origins=…)`. Three in-memory ring buffers (all `deque(maxlen=RING_BUFFER_SIZE=200)`):
+  `_events`, `_alerts`, and per-device `_forecast`. Emit paths append then `await sio.emit(...)`.
+  Snapshot getters slice the last `limit` entries for the REST routes.
+- **`events.py` — the routing/enrichment core:** `EventProcessor.handle()` (now `async`)
+  emits every incoming event to `sio.event` first (so the chart's actual-line updates for
+  every 10s window); if `event_type == WINDOW_METRICS`, appends to the device buffer and
+  returns; otherwise logs `[EVENT] <type>` and calls `_enrich_and_emit()`. That method
+  reads the device buffer, if it has exactly `LAG_WINDOWS` entries and `MaasClient` is set
+  awaits `predict()`, then builds the enriched-alert dict per §message-contract Enriched
+  alert (ts / device / event_type / actual_avg_temp / forecast_next_avg_temp /
+  forecast_available / model_version / message / window_start / window_end /
+  decision_time_ms). The `message` is human-readable:
+  `[PREDICTIVE ALERT] device=<d> eKuiper=<type> (avg <t>°C) | MaaS=next <f>°C | pre-emptive`
+  when the forecast lands, or `| MaaS=unavailable (buffer not full yet)` or
+  `| MaaS=unavailable (prediction unavailable)` on the two fallback paths. Emits `sio.alert`
+  and logs the message line.
+- **`main.py` (rewrite):** load config eagerly so `SioBus(cors, ring_size)` can be
+  constructed at module scope (`socketio.ASGIApp` needs a live server before uvicorn starts;
+  keeps the same instance the lifespan wires into the `EventProcessor`). Lifespan builds
+  `Metrics` + `MaasClient` + `EventProcessor(cfg, metrics, maas=maas, sio=sio_bus)`, kicks off
+  `consume_loop(adapter, processor)` in an `asyncio.Task` (wrapping `processor.handle()` in a
+  try/except so one bad event never kills the loop), and on shutdown `await maas.close()`.
+  Uvicorn serves `asgi_app = socketio.ASGIApp(sio_bus.sio, other_asgi_app=fastapi_app)`.
+- **REST snapshots (§message-contract Snapshots + §D11):**
+  - `GET /api/events?limit=` — last N raw `sensors/events` (used for chart's actual line + feed seed).
+  - `GET /api/alerts?limit=` — last N enriched alerts (feed seed).
+  - `GET /api/forecast/{device}?limit=` — per-device history of `(ts, actual, forecast, available)`.
+  - `GET /api/devices` — devices seen so far (drives the selector).
+- **Compose:** `analytics` service now passes `MAAS_URL`, `MAAS_TIMEOUT_MS`, `LAG_WINDOWS`,
+  `SOCKETIO_CORS_ORIGINS` via env; `.env.example` already carried the keys (Phase 0).
+- **Verified live** (fresh full-stack boot):
+  - `[PREDICTIVE ALERT] device=… eKuiper=HIGH_CO | MaaS=next 22.3°C | pre-emptive` streaming
+    on `docker logs iots-analytics`.
+  - `curl :3003/api/alerts?limit=5` returns the exact enriched-alert JSON shape.
+  - `docker stop iots-maas` → alerts keep flowing but with
+    `MaaS=unavailable (prediction unavailable)` and `forecast_available:false`; no hang;
+    `docker start iots-maas` → forecasts resume.
+- **Commit (proposed part of):** `feat(iots3): complete Phases 5–8 — MaaS integration, advanced CEP, web app, delivery`
+
 ### Phase 4 — MaaS FastAPI service — 2026-07-09
 - **`maas/app.py` — FastAPI wrapper.** `lifespan` handler loads `MODEL_PATH` + `model_meta.json`
   **once** at startup and stores them on `app.state`; **no training at boot** (Phase 4 acceptance).

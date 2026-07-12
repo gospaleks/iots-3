@@ -16,6 +16,9 @@ WINDOW_UNIT="${WINDOW_UNIT:-ss}"
 WINDOW_SIZE="${WINDOW_SIZE:-10}"
 WINDOW_STEP="${WINDOW_STEP:-}"
 CO_HIGH="${CO_HIGH:-0.010}"
+SUSTAINED_TEMP="${SUSTAINED_TEMP:-25.0}"
+TEMP_HIGH="${TEMP_HIGH:-28.0}"
+HUMIDITY_LOW="${HUMIDITY_LOW:-40.0}"
 
 SRC=/ekuiper
 TMP=/tmp/ekuiper
@@ -62,6 +65,9 @@ provision_rule() {
   curl -s -X DELETE "$EKUIPER_URL/rules/$id" >/dev/null 2>&1 || true
   sed -e "s|__WIN__|$WIN|g" \
       -e "s|__CO_HIGH__|$CO_HIGH|g" \
+      -e "s|__SUSTAINED_TEMP__|$SUSTAINED_TEMP|g" \
+      -e "s|__TEMP_HIGH__|$TEMP_HIGH|g" \
+      -e "s|__HUMIDITY_LOW__|$HUMIDITY_LOW|g" \
       -e "s|__EVENTS_TOPIC__|$EVENTS_TOPIC|g" \
       -e "s|__BROKER_URL__|$BROKER_URL|g" \
       "$SRC/rules/$file" > "$TMP/$file"
@@ -74,6 +80,8 @@ provision_rule() {
 
 provision_rule window_metrics window_metrics.json
 provision_rule high_co high_co.json
+provision_rule sustained_high_temp sustained_high_temp.json
+provision_rule heat_drying heat_drying.json
 
 echo "[provision] done. Registered rules:"
 curl -s "$EKUIPER_URL/rules"

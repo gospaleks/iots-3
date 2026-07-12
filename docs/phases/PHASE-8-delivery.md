@@ -43,13 +43,18 @@ repo with clean history.
 - `README.md` (root, full rewrite for P3), any final compose/env tidy-ups.
 
 ## 5. Acceptance criteria (exit gate — project done)
-- [ ] Single `docker compose … up` on a fresh clone yields the full working pipeline (no manual UI).
-- [ ] README has architecture + a short paragraph per microservice + run guide + model card.
-- [ ] `mosquitto_sub -t 'sensors/events'` shows live events; Analytics emits Socket.IO
+- [x] Single `docker compose … up` on a fresh clone yields the full working pipeline (no manual UI).
+      *(verified: `--profile mqtt --profile app --profile cep --profile ml --profile web up -d` → 9 containers healthy, eKuiper 4/4 rules `running` from the one-shot provisioner, no clicks)*
+- [x] README has architecture + a short paragraph per microservice + run guide + model card.
+      *(root `README.md` covers all six; `objasnjenje.md` gives the Serbian presentation guide with the same content, mapped to the project brief)*
+- [x] `mosquitto_sub -t 'sensors/events'` shows live events; Analytics emits Socket.IO
       `event`/`alert` and `/api/*` snapshots respond; `[PREDICTIVE ALERT]` lines appear in Analytics logs.
-- [ ] `curl :maas/model/info` reports train/val/test metrics.
-- [ ] Web app renders event feed, alerts, predicted-vs-actual chart; pipeline runs without it.
-- [ ] GitHub repo published; all Phase 0–8 acceptance items ticked in `SESSION_STATE.md`.
+      *(verified: SUSTAINED_HIGH_TEMP events on the bus; `curl :3003/api/alerts?limit=200` returns 200 alerts; Analytics logs show `[PREDICTIVE ALERT] … | MaaS=next 27.6°C | pre-emptive`)*
+- [x] `curl :maas/model/info` reports train/val/test metrics.
+      *(`test R²=0.9877, MAE=0.0726 °C, RMSE=0.4203`)*
+- [x] Web app renders event feed, alerts, predicted-vs-actual chart; pipeline runs without it.
+      *(verified in the browser + non-blocking test)*
+- [x] GitHub repo published; all Phase 0–8 acceptance items ticked in `SESSION_STATE.md`.
 
 ## 6. How to verify
 - Run the fresh-clone command in §3.1 on a clean machine/dir; walk the §5 checklist.

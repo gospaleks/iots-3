@@ -67,10 +67,14 @@ Analytics **REST snapshots** via TanStack Query + axios.
 - `docker/docker-compose.yml` (+ `webapp`, profile `web`)
 
 ## 6. Acceptance criteria (exit gate)
-- [ ] App loads initial data from `/api/*` (TanStack Query) and then updates live via socket.io.
-- [ ] Event feed + predictive-alert feed render; predicted-vs-actual chart updates as events/alerts arrive.
-- [ ] App runs as a container via the `web` profile; nothing depends on it.
-- [ ] Pipeline still runs with the web app stopped.
+- [x] App loads initial data from `/api/*` (TanStack Query) and then updates live via socket.io.
+      *(verified: `useLiveStreams` seeds from `useQuery` snapshots then subscribes to `event`/`alert`)*
+- [x] Event feed + predictive-alert feed render; predicted-vs-actual chart updates as events/alerts arrive.
+      *(verified in the browser: HIGH_CO rows stream in the feed; alert cards show actual vs forecast; chart plots forecast dots)*
+- [x] App runs as a container via the `web` profile; nothing depends on it.
+      *(compose: no `depends_on` refers to `webapp`; port 8080 → nginx :80)*
+- [x] Pipeline still runs with the web app stopped.
+      *(verified during dev with `docker stop iots-webapp` — Analytics + MaaS + eKuiper untouched)*
 
 ## 7. How to verify
 ```bash

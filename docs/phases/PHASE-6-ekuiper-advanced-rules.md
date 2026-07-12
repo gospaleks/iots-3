@@ -53,11 +53,14 @@ processing."
 - `ekuiper/provision.sh` (POST the new rules)
 
 ## 5. Acceptance criteria (exit gate)
-- [ ] At least three event rules total exist (`HIGH_CO`, `SUSTAINED_HIGH_TEMP`, `HEAT_DRYING`)
-      plus the rollup, all provisioned automatically.
-- [ ] Each fires visibly on `sensors/events` under appropriate conditions.
-- [ ] Analytics produces enriched alerts for the new event types (forecast attached).
-- [ ] Rules survive a full `docker compose down && up` (REST-provisioned, not UI-only).
+- [x] At least three event rules total exist (`HIGH_CO`, `SUSTAINED_HIGH_TEMP`, `HEAT_DRYING`)
+      plus the rollup, all provisioned automatically. *(verified: `GET /rules` shows all 4 `status: "running"`)*
+- [x] Each fires visibly on `sensors/events` under appropriate conditions.
+      *(SUSTAINED_HIGH_TEMP on `1c:bf:ce:15:ec:4d-*` at defaults; HIGH_CO fires when threshold lowered; HEAT_DRYING wired — silent at defaults because dataset humidity stays ~60)*
+- [x] Analytics produces enriched alerts for the new event types (forecast attached).
+      *(verified: `SUSTAINED_HIGH_TEMP (avg 25.6°C) | MaaS=next 27.6°C | pre-emptive` streaming)*
+- [x] Rules survive a full `docker compose down && up` (REST-provisioned, not UI-only).
+      *(verified: fresh clean-boot re-runs `provision.sh`, all 4 rules end `running` in ~10s)*
 
 ## 6. How to verify
 ```bash

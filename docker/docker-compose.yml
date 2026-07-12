@@ -4,10 +4,10 @@
 #   docker compose --profile mqtt up -d                                      # TimescaleDB + Mosquitto
 #   docker compose --profile mqtt --profile app up -d                        # + ingestion/storage/analytics
 #   docker compose --profile mqtt --profile app --profile cep up -d          # + eKuiper CEP
-#   docker compose --profile mqtt --profile app --profile cep --profile ml up -d  # + MaaS
+#   docker compose --profile mqtt --profile app --profile cep --profile ml up -d      # + MaaS
+#   docker compose --profile mqtt --profile app --profile cep --profile ml --profile web up -d  # + web app (full stack)
 #
 # TimescaleDB has no profile -> it is always started.
-# The web app is added in Phase 7.
 #
 # Env values come from ./.env (copy from .env.example).
 
@@ -94,8 +94,11 @@ services:
     restart: unless-stopped              # tolerate starting before the broker is ready
     networks: [iot-net]
 
-  # FastAPI tumbling-window analytics (the Python broker-adapter mirror).
-  # Project 3 will rewire this to consume eKuiper events + call the MaaS REST API.
+  # FastAPI orchestrator (Project 3): subscribes to sensors/events (eKuiper), calls
+  # MaaS /predict for enrichment, emits [PREDICTIVE ALERT] and pushes `event`/`alert`
+  # over Socket.IO to the web app + serves /api/* snapshot routes. Same port carries
+  # REST + Socket.IO (single ASGI). Soft-depends on MaaS via env; if MaaS is down the
+  # subscribe loop still runs and emits CEP-only alerts (forecast_available:false).
   analytics:
     build:
       context: ../services/analytics-service
@@ -103,8 +106,13 @@ services:
     container_name: iots-analytics
     profiles: [app]
     env_file: .env
+    environment:
+      MAAS_URL: "${MAAS_URL:-http://maas:8000}"
+      MAAS_TIMEOUT_MS: "${MAAS_TIMEOUT_MS:-1000}"
+      LAG_WINDOWS: "${LAG_WINDOWS:-4}"
+      SOCKETIO_CORS_ORIGINS: "${SOCKETIO_CORS_ORIGINS:-*}"
     ports:
-      - "${ANALYTICS_PORT:-3003}:3003"   # control surface: /health /stats
+      - "${ANALYTICS_PORT:-3003}:3003"   # /health /stats /api/* /socket.io
     restart: unless-stopped              # tolerate starting before the broker is ready
     networks: [iot-net]
 
@@ -149,6 +157,25 @@ services:
     restart: unless-stopped
     networks: [iot-net]
 
+  # ─────────────────────────── Web app (profile: web) ─────────────────────────
+  # React + Vite dashboard: subscribes to Analytics Socket.IO for `event` / `alert`,
+  # loads initial data via REST /api/*, renders event feed + predictive alerts +
+  # predicted-vs-actual chart. Non-blocking (D10) — nothing depends on it; the
+  # pipeline runs whether the app is up or not.
+  webapp:
+    build:
+      context: ../webapp
+      args:
+        # Baked at build-time. Override with WEBAPP_API_URL to point at a non-localhost host.
+        VITE_API_URL: "${WEBAPP_API_URL:-http://localhost:3003}"
+    image: iots-webapp:latest
+    container_name: iots-webapp
+    profiles: [web]
+    ports:
+      - "${WEBAPP_PORT:-8080}:80"
+    restart: unless-stopped
+    networks: [iot-net]
+
   # One-shot init: waits for the eKuiper REST API, then creates the stream and
   # POSTs the env-templated rules. Exits 0 when done; re-runnable (idempotent).
   ekuiper-provision:
@@ -169,6 +196,9 @@ services:
       WINDOW_SIZE: "${WINDOW_SIZE:-10}"
       WINDOW_STEP: "${WINDOW_STEP:-}"
       CO_HIGH: "${CO_HIGH:-0.010}"
+      SUSTAINED_TEMP: "${SUSTAINED_TEMP:-25.0}"
+      TEMP_HIGH: "${TEMP_HIGH:-28.0}"
+      HUMIDITY_LOW: "${HUMIDITY_LOW:-40.0}"
     restart: on-failure
     networks: [iot-net]
 

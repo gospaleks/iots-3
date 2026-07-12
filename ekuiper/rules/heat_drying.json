@@ -1,0 +1,7 @@
+{
+  "id": "heat_drying",
+  "sql": "SELECT device, AVG(temp) AS avg_temp, MAX(temp) AS max_temp, MIN(temp) AS min_temp, AVG(humidity) AS avg_humidity, AVG(co) AS avg_co, AVG(lpg) AS avg_lpg, AVG(smoke) AS avg_smoke, COUNT(*) AS sample_count, window_start() AS window_start, window_end() AS window_end, 'HEAT_DRYING' AS event_type FROM sensor_stream GROUP BY device, __WIN__ HAVING AVG(temp) > __TEMP_HIGH__ AND AVG(humidity) < __HUMIDITY_LOW__",
+  "actions": [
+    { "mqtt": { "server": "__BROKER_URL__", "topic": "__EVENTS_TOPIC__", "sendSingle": true } }
+  ]
+}

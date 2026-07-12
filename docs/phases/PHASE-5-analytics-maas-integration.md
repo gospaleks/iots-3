@@ -54,11 +54,15 @@ After this, `docker compose up` runs the whole pipeline end-to-end.
 - `docker/docker-compose.yml` (analytics depends_on maas; ensure `ml` profile up together; Analytics `:3003` also serves Socket.IO + `/api/*`)
 
 ## 5. Acceptance criteria (exit gate)
-- [ ] For an event-of-interest with a full buffer, Analytics logs `[PREDICTIVE ALERT]` including a MaaS forecast.
-- [ ] Analytics emits `event` and `alert` over Socket.IO; a connecting client receives them, and `alert` matches §2.3.
-- [ ] REST snapshot routes (`/api/events`, `/api/alerts`, `/api/forecast/{device}`) return recent data.
-- [ ] With MaaS stopped, Analytics still emits a CEP-only alert (`forecast_available:false`) and does not hang.
-- [ ] Whole pipeline runs from a single `docker compose up` (mqtt+app+cep+ml profiles).
+- [x] For an event-of-interest with a full buffer, Analytics logs `[PREDICTIVE ALERT]` including a MaaS forecast.
+      *(verified: `[PREDICTIVE ALERT] device=1c:bf:ce:15:ec:4d-82 eKuiper=SUSTAINED_HIGH_TEMP (avg 25.6°C) | MaaS=next 27.6°C | pre-emptive`)*
+- [x] Analytics emits `event` and `alert` over Socket.IO; a connecting client receives them, and `alert` matches §2.3.
+      *(verified in the browser: `Socket.IO connected` pill green; alert cards populate live)*
+- [x] REST snapshot routes (`/api/events`, `/api/alerts`, `/api/forecast/{device}`) return recent data.
+      *(verified: `curl :3003/api/alerts?limit=200` returns 200 alerts in the exact enriched-alert JSON shape)*
+- [x] With MaaS stopped, Analytics still emits a CEP-only alert (`forecast_available:false`) and does not hang.
+      *(verified: `docker stop iots-maas` → alerts continue with `MaaS=unavailable (prediction unavailable)`, `docker start iots-maas` → forecasts resume)*
+- [x] Whole pipeline runs from a single `docker compose up` (mqtt+app+cep+ml profiles).
 
 ## 6. How to verify
 ```bash

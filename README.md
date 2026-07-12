@@ -36,14 +36,16 @@ ingestion (NestJS) ──publish sensors/telemetry──▶ Mosquitto (MQTT) ─
   writes to a TimescaleDB hypertable (`DIRECT`/`BATCH`, idempotent `ON CONFLICT`). *(reused)*
 - **eKuiper** — LF Edge stream/CEP engine; SQL rules over `sensors/telemetry` detect events →
   publishes them to `sensors/events`. *(new — ✅ built, Phase 1)*
-- **analytics** — FastAPI; consumes `sensors/events`, buffers per-device rollups, (soon) calls
-  MaaS `/predict` and emits enriched predictive alerts. *(modified — ✅ consuming events, Phase 2;
-  MaaS call lands in Phase 5)*
+- **analytics** — FastAPI; orchestrator that consumes `sensors/events`, buffers per-device rollups,
+  calls MaaS `/predict` (with a hard timeout and CEP-only fallback), emits `[PREDICTIVE ALERT]`
+  lines and pushes `event`/`alert` to the web app over **Socket.IO** + REST snapshot routes
+  under `/api/*`. *(modified — ✅ Phases 2 + 5, all delivered)*
 - **MaaS** — Python + FastAPI; a RandomForest next-window temperature forecaster behind
   `POST /predict`, `GET /health`, `GET /model/info`. *(new — ✅ Phases 3–4; the artifact ships
   in the image, loaded once at startup)*
-- **web app** — visualizes CEP events, predictive alerts, and MaaS predictions. Non-blocking.
-  *(new — ⬜ Phase 7)*
+- **web app** — React + Vite + Tailwind + TanStack Query + Socket.IO + Recharts; visualizes CEP
+  events, predictive alerts, and MaaS predictions (predicted-vs-actual chart). Non-blocking.
+  *(new — ✅ Phase 7; served by nginx under the `web` profile at :8080)*
 
 The reused services depend only on a broker `BrokerAdapter` interface (Nest DI for the two
 NestJS services, an async mirror in the Python analytics service). Project 3 is MQTT-only.
@@ -57,10 +59,10 @@ NestJS services, an async mirror in the Python analytics service). Project 3 is 
 | TimescaleDB | **Reused** | Historical store; offline MaaS training source; optional web-app source. |
 | Mosquitto (MQTT) | **Reused** | The message backbone. |
 | Message contract | **Reused** | `shared/message-contract.md` — eKuiper stream + MaaS features derive from it. |
-| Analytics Service (FastAPI) | **Modified** — ✅ Phase 2 | Consumes `sensors/events`, routes by type, buffers rollups. MaaS call in Phase 5. |
-| eKuiper (Streaming/CEP) | **New** — ✅ Phase 1 | `WINDOW_METRICS` rollup + `HIGH_CO` threshold → `sensors/events`, REST-provisioned. |
+| Analytics Service (FastAPI) | **Modified** — ✅ Phases 2 + 5 | Consumes `sensors/events`, calls MaaS `/predict` (timeout + CEP-only fallback), emits `[PREDICTIVE ALERT]`, and pushes `event`/`alert` over Socket.IO + REST snapshot routes `/api/*`. |
+| eKuiper (Streaming/CEP) | **New** — ✅ Phases 1 + 6 | `WINDOW_METRICS` rollup + `HIGH_CO` (threshold) + `SUSTAINED_HIGH_TEMP` (windowed HAVING) + `HEAT_DRYING` (multi-condition correlation) → `sensors/events`, REST-provisioned. |
 | MaaS (Model-as-a-Service) | **New** — ✅ Phase 3/4 | RandomForest forecaster (test R²=0.988) behind FastAPI `/predict /health /model/info`; artifact ships in image. |
-| Web app | **New** — ⬜ Phase 7 | CEP events + predictions + alerts viewer. |
+| Web app | **New** — ✅ Phase 7 | React+Vite+Tailwind+Socket.IO dashboard: live event feed, predictive alerts, predicted-vs-actual chart. Non-blocking. |
 
 ## Repository layout
 
@@ -118,8 +120,11 @@ $C --profile mqtt --profile app --profile cep up -d
 # + MaaS (POST /predict wraps the trained forecaster):
 $C --profile mqtt --profile app --profile cep --profile ml up -d
 
+# + Web app (full stack — dashboard at http://localhost:8080):
+$C --profile mqtt --profile app --profile cep --profile ml --profile web up -d
+
 # Tear down (add -v to wipe volumes):
-$C --profile mqtt --profile app --profile cep --profile ml down
+$C --profile mqtt --profile app --profile cep --profile ml --profile web down
 ```
 
 > eKuiper `depends_on: mosquitto`, so once you add `--profile cep` **every** compose command for
@@ -127,9 +132,9 @@ $C --profile mqtt --profile app --profile cep --profile ml down
 > inspection, and the env-templated window. See [maas/README.md](maas/README.md) for the REST
 > contract and Swagger UI at [`http://localhost:8000/docs`](http://localhost:8000/docs).
 
-> **Coming in later iterations:** the Analytics→MaaS enrichment + Socket.IO push (Phase 5) and
-> `webapp` (Phase 7) will be added under a `web` profile so `docker compose up` brings up the
-> full CEP + ML + UI pipeline. This run section will grow with them.
+Open the dashboard at [`http://localhost:8080`](http://localhost:8080). Live data arrives over
+Socket.IO from Analytics; initial paint uses the `/api/*` REST snapshots so the UI never shows
+a blank state. **Non-blocking:** the pipeline runs whether or not the web app is up.
 
 ### Service control surface (HTTP)
 
@@ -137,8 +142,9 @@ $C --profile mqtt --profile app --profile cep --profile ml down
 |---------|------|-----------|
 | ingestion | 3001 | `GET /health`, `GET /stats`, `POST /burst?durationSec=N` |
 | storage   | 3002 | `GET /health`, `GET /stats` (received, stored, conflicts, `seq` integrity, transport latency) |
-| analytics | 3003 | `GET /health`, `GET /stats` (events by type, per-device rollup buffer depth) |
+| analytics | 3003 | `GET /health`, `GET /stats` (events by type, per-device rollup buffer depth); **Socket.IO** at `/socket.io` (`event`, `alert` channels); **REST snapshots** `/api/events`, `/api/alerts`, `/api/forecast/{device}`, `/api/devices` |
 | maas      | 8000 | `GET /health`, `GET /model/info`, `POST /predict`, `GET /docs` (Swagger) |
+| webapp    | 8080 | React dashboard (event feed, predictive alerts, predicted-vs-actual chart) |
 
 ```bash
 curl -s localhost:3002/stats | python3 -m json.tool      # storage integrity + latency
@@ -165,6 +171,7 @@ BROKER_TYPE=mqtt BROKER_HOST=localhost BROKER_PORT=1883 npm run smoke -w @iots/b
 | [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) · [docs/phases/](docs/phases/) | Phased roadmap + per-phase build docs (0–8). |
 | [shared/message-contract.md](shared/message-contract.md) · [shared/dataset_info.md](shared/dataset_info.md) · [shared/thresholds.md](shared/thresholds.md) | Payload/topics · dataset schema · °C thresholds + window/feature constants. |
 | [CLAUDE.md](CLAUDE.md) · [SESSION_STATE.md](SESSION_STATE.md) | Project reference + change log · session handoff for the next developer. |
+| [objasnjenje.md](objasnjenje.md) | **Presentation guide (Serbian)** — maps the deliverable point-by-point to the project brief; includes an elevator pitch. |
 
 ## License / context
 
