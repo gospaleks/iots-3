@@ -186,46 +186,259 @@ je runtime iz nginx-a bez ijedne Node dependency.
 
 ---
 
-## 5. Kako pokrenuti
+## 5. Kako pokrenuti — korak po korak (Windows + Docker Desktop)
 
-**Fresh clone od nule** (5 koraka):
+**Preduslovi na mašini:**
+- Windows 10/11 sa **Docker Desktop** (Linux containers, sa WSL2 backend-om) — daemon mora biti startovan (whale ikonica u system tray zelena)
+- **Git** za klon
+- Terminal (PowerShell ili Git Bash)
+- (Opciono) Chrome/Firefox/Edge za dashboard
 
-```bash
-# 1. Dataset (gitignored, ~62 MB) — postavi u data/
-#    data/iot_telemetry_data.csv
-# 2. .env
-cp docker/.env.example docker/.env
-# 3. (Jednom, iz maas/) — trening modela; artifact se sprema u maas/models/
-docker run --rm -v "$PWD/maas:/maas" -v "$PWD/data:/data" -w /maas \
+### 5.1 Klon i priprema (jednom po mašini)
+
+```powershell
+git clone https://github.com/gospaleks/iots-3.git
+cd iots-3
+
+# 1) Dataset (gitignored, ~62 MB). Preuzmi Environmental Sensor Telemetry Data
+#    (Kaggle: garystafford/environmental-sensor-data-132k) i snimi kao:
+#    data\iot_telemetry_data.csv
+#    Prvi red mora biti: "ts","device","co","humidity","light","lpg","motion","smoke","temp"
+
+# 2) Env fajl:
+Copy-Item docker\.env.example docker\.env
+
+# 3) Trening modela (jednom — pravi maas\models\model.joblib, ~14 MB).
+#    Traje ~30–60s na Docker Desktop. Ne treba ti sklearn na hostu.
+docker run --rm `
+  -v "${PWD}\maas:/maas" `
+  -v "${PWD}\data:/data" `
+  -w /maas `
   python:3.12-slim bash -c "pip install -q -r requirements.txt && python train.py"
-# 4. Podigni ceo stack jednom komandom (svi profili):
-docker compose -f docker/docker-compose.yml \
-  --profile mqtt --profile app --profile cep --profile ml --profile web up -d
-# 5. Otvori u browseru
-open http://localhost:8080     # web app dashboard (Chrome/Firefox/Edge)
-open http://localhost:8000/docs # MaaS Swagger UI (test /predict ručno)
 ```
 
-**Verifikacija E2E** (dok stack radi):
+Očekivan izlaz treninga (poslednja 3 reda):
+```
+[train] validation: {'mae': 0.058, 'rmse': 0.369, 'r2': 0.985, 'n': 30186}
+[train] test:       {'mae': 0.073, 'rmse': 0.420, 'r2': 0.988, 'n': 30187}
+[train] wrote models/model.joblib, metrics.json, model_meta.json to models/
+```
 
-```bash
+### 5.2 Pun stack — jedna komanda
+
+```powershell
+docker compose -f docker/docker-compose.yml `
+  --profile mqtt --profile app --profile cep --profile ml --profile web up -d
+```
+
+Šta se startuje (9 kontejnera):
+
+| Kontejner | Port | Uloga |
+|-----------|------|-------|
+| `iots-timescaledb` | 5432 | baza (hipertabela) |
+| `iots-mosquitto` | 1883 | MQTT broker |
+| `iots-ingestion` | 3001 | simulator uređaja (publisher) |
+| `iots-storage` | 3002 | subscriber → TimescaleDB writer |
+| `iots-analytics` | 3003 | orkestrator + Socket.IO + REST /api/* |
+| `iots-ekuiper` | 9081 | CEP engine (REST management) |
+| `iots-ekuiper-provision` | — | one-shot: postavlja stream + 4 pravila i izlazi |
+| `iots-maas` | 8000 | FastAPI + RandomForest (/predict, /docs) |
+| `iots-webapp` | 8080 | React dashboard |
+
+Prvi start je ~30–60s (build image-a). Sledeći put — sekunde, jer se image-i keš-iraju.
+
+### 5.3 Otvori u browser-u
+
+- **Dashboard:** http://localhost:8080
+- **MaaS Swagger** (za ručno testiranje `/predict`): http://localhost:8000/docs
+
+### 5.4 Ugasi kad završiš
+
+```powershell
+docker compose -f docker/docker-compose.yml `
+  --profile mqtt --profile app --profile cep --profile ml --profile web down
+```
+
+Dodaj `-v` na kraj ako želiš i da obrišeš volumes (TimescaleDB podatke, Mosquitto retention).
+
+---
+
+## 5b. Kako da sam proveriš da sve radi (checklist)
+
+Nakon što je `up -d` završio, sačekaj **~30s** da se buffer napuni (eKuiper prozor je 10s, treba 4
+prozora × 10s = **40s** za pun feature vektor), pa proveri redom:
+
+### ✅ 1) Svi kontejneri gore (i nijedan ne restartuje)
+
+```powershell
+docker ps --format "table {{.Names}}\t{{.Status}}"
+```
+
+Trebalo bi da vidiš 8 `Up …` linija (9. `iots-ekuiper-provision` je one-shot i posle uspešnog
+provisioning-a izlazi sa exit 0 — to je normalno; ne pojavljuje se u `docker ps` posle par sekundi).
+`Restarting` znači problem — pogledaj `docker logs <ime>`.
+
+### ✅ 2) MaaS health + model card
+
+```powershell
+curl http://localhost:8000/health
+curl http://localhost:8000/model/info
+```
+
+Očekuješ:
+- `/health` → `{"status":"ok"}`
+- `/model/info` → JSON sa `task=next_window_avg_temp regression`, `algorithm=RandomForestRegressor`,
+  `metrics.test.r2 ≈ 0.988`, `mae ≈ 0.073`, `version=1.0`
+
+### ✅ 3) eKuiper 4 pravila u statusu `running`
+
+```powershell
+curl http://localhost:9081/rules
+```
+
+Traži svih 4: **`window_metrics`**, **`high_co`**, **`sustained_high_temp`**, **`heat_drying`** —
+svako sa `"status":"running"`. Ako neko nedostaje ili je `stopped`, zapušio se provisioner — pogledaj
+`docker logs iots-ekuiper-provision`.
+
+### ✅ 4) Analytics prima događaje i puni buffer
+
+```powershell
+curl http://localhost:3003/stats
+```
+
+Traži:
+- `eventsByType` treba da sadrži bar `WINDOW_METRICS` (posle par sekundi) i `SUSTAINED_HIGH_TEMP`
+  (posle ~40s — jer se javlja samo za `1c:bf:ce:15:ec:4d-*` uređaje kad avg_temp pređe 25°C)
+- `bufferDepthByDevice` — vrednosti 4 (pun buffer) za sve 100 simuliranih uređaja posle ~40s
+
+### ✅ 5) [PREDICTIVE ALERT] linije u Analytics log-u (**najvažnija provera**)
+
+```powershell
+docker logs --tail=100 iots-analytics | Select-String "PREDICTIVE ALERT"
+```
+
+Očekivan format (jedna od ovih varijanti):
+```
+[PREDICTIVE ALERT] device=1c:bf:ce:15:ec:4d-82 eKuiper=SUSTAINED_HIGH_TEMP (avg 25.6°C) | MaaS=next 27.6°C | pre-emptive
+[PREDICTIVE ALERT] device=... eKuiper=HIGH_CO (avg 22.3°C) | MaaS=next 22.1°C | pre-emptive
+```
+
+Vidiš `| MaaS=next X.X°C | pre-emptive` → **ML predikcija radi**.
+Vidiš `| MaaS=unavailable (buffer not full yet)` — sačekaj još 10-20s da se buffer napuni.
+
+### ✅ 6) Sirovi eKuiper events (dokaz da CEP pravilo emituje na `sensors/events`)
+
+```powershell
+docker exec iots-mosquitto mosquitto_sub -t "sensors/events" -C 5
+```
+
+`-C 5` = izađi posle 5 poruka. Vidiš JSON objekte sa `event_type`, `device`, `avg_temp`, itd.
+
+### ✅ 7) REST snapshot rute (dokaz da Analytics puni ring buffer)
+
+```powershell
+curl "http://localhost:3003/api/alerts?limit=3"
+curl "http://localhost:3003/api/events?limit=3"
+curl "http://localhost:3003/api/devices"
+```
+
+Prvi vraća niz enriched alertova sa `forecast_next_avg_temp` i `message`. Treći listu do 100 device
+id-eva.
+
+### ✅ 8) Web dashboard — http://localhost:8080
+
+Otvori u browser-u. Trebalo bi da vidiš:
+
+- **U gornjem desnom uglu:** zelena "Socket.IO connected" pilulica.
+- **U zaglavlju:** "devices seen: 100" (ako je manje, sačekaj još 10s).
+- **CEP event feed** (donji-levi): rolling tabela `WINDOW_METRICS` (sivo) + `HIGH_CO`/`SUSTAINED_HIGH_TEMP` (u boji).
+- **Predictive alerts** (donji-desni): kartice sa `actual = XX.X °C`, `forecast = XX.X °C`, badge
+  `forecast v1.0`, i celom `[PREDICTIVE ALERT] ...` porukom.
+- **Predicted vs actual chart** (gornji panel): izaberi u dropdown-u nešto što počinje sa
+  `1c:bf:ce:15:ec:4d-` (ovi uređaji imaju najviše temperaturu i najviše alertova) — biće plava
+  isprekidana forecast linija.
+
+### ✅ 9) MaaS Swagger — ručan test predikcije
+
+Otvori http://localhost:8000/docs → `POST /predict` → "Try it out" → Execute sa default body-jem.
+Očekuješ `HTTP 200` i `{"prediction": ~26.7, "target": "next_window_avg_temp", "unit": "C", ...}`.
+Ako promeniš `history` da ima 3 elementa umesto 4 → **HTTP 400** sa jasnim error message-om (to je
+namerno — dokaz da validation radi).
+
+### ✅ 10) Fallback test — ubi MaaS, pipeline ne pada
+
+```powershell
+docker stop iots-maas
+Start-Sleep -Seconds 15
+docker logs --tail=30 iots-analytics | Select-String "prediction unavailable"
+```
+
+Očekuješ `[PREDICTIVE ALERT] ... | MaaS=unavailable (prediction unavailable)` linije. Bez
+`iots-analytics` restart-a, bez hang-a. Vrati MaaS: `docker start iots-maas`, sačekaj 3s, i alerti
+opet imaju `MaaS=next X.X°C`.
+
+---
+
+## 5c. Šta je profesor tražio i kako da vizuelno demonstriraš svaku tačku
+
+| Tačka zadatka | Šta profesor traži | Kako da pokažeš (5-10 sekundi) |
+|---------------|---------------------|--------------------------------|
+| **1.** Unaprediti Analytics iz P2 da koristi (a) eKuiper CEP i (b) MaaS REST | Da Analytics više ne radi ručnu analizu | Otvori `services/analytics-service/app/main.py` i `events.py` — pokaži da nema starog "window" fajla. Pokaži `[PREDICTIVE ALERT]` liniju u log-u koja spaja eKuiper `SUSTAINED_HIGH_TEMP` + MaaS `next 27.6°C`. |
+| **2.** eKuiper pretplaćen na isti topic kao Analytics u P2, primenjuje pravila, emituje na novi topic | Kompletno je definisan CEP sloj | Pokaži `ekuiper/rules/*.json` (4 pravila) i output-uj: `docker exec iots-mosquitto mosquitto_sub -t "sensors/telemetry" -C 1` (raw ulaz) pa isto sa `-t "sensors/events" -C 1` (obrađeni izlaz). Pomeni da su pravila provisionovana **preko REST-a** iz `provision.sh`, ne UI klikanjem. |
+| **3.** MaaS = Python + FastAPI + scikit-learn, klasifikacija/regresija na vremenskoj seriji | Da model realno predviđa | Otvori http://localhost:8000/docs → izvrši `/predict` na primeru. Ubi MaaS (`docker stop iots-maas`) i pokaži da Analytics dalje radi (fallback). Pokaži `curl :8000/model/info` sa test R²=0.988 i MAE=0.073°C. |
+| **4.** Sve u Docker kontejnerima + web app | Jedna komanda podiže pipeline | `docker ps` → 8 kontejnera. Pokaži dashboard http://localhost:8080. Napomeni: `docker stop iots-webapp` → sve nastavlja jer je webapp **non-blocking** (`docker ps` opet, vidiš da Analytics/MaaS/eKuiper i dalje rade). |
+| **5.** Kod na GitHub-u + kratak opis mikroservisa | Repo javan + čitljiv | Otvori `https://github.com/gospaleks/iots-3` → pokaži README (Reused/Modified/New tabela) i `objasnjenje.md` (ovaj fajl, u kome je paragraf po servisu). |
+
+### Kratke replike ako te pitaju detalje
+
+- **"Zašto Random Forest a ne LSTM?"** → "RF sa lag features je jednostavan baseline koji je
+  postigao R²=0.988 na test setu. LSTM/GBRT bi bili sledeći korak ako treba manja MAE, ali za 10s
+  prozor i temperaturu koja je stabilna, RF je dovoljan i brz (predikcija u milisekundama,
+  bezuslovno unutar 1s Analytics timeout-a)."
+
+- **"Kako se pravila u eKuiper-u menjaju bez redeploy-a?"** → "Ne menjaju se u produkciji — svrha
+  provisioning-a preko REST-a je da je reproduktivno. Ako treba nov threshold, izmeni `.env`, pa
+  `docker compose --profile cep run --rm ekuiper-provision` — DELETE-then-POST je idempotent."
+
+- **"Šta je Feature parity?"** → "`maas/features.py` je jedini fajl koji zna kako se pravi feature
+  vektor. Uvezen je i u `train.py` i u `app.py` — `from features import feature_vector`. Bez ovoga
+  je moguće da treniraš na jednom obliku a servis šalje drugi (klasičan train/serve skew), pa se
+  metrike u prod-u razlikuju od test seta."
+
+- **"Šta ako Mosquitto padne?"** → "Ingestion, Storage i Analytics imaju `restart: unless-stopped`
+  u compose-u i broker adapter reconnect logiku. Kad broker vrati, servisi se ponovo pridruže."
+
+### Vrlo brzi demo (2 minuta ekrana)
+
+1. `docker ps` — svi kontejneri
+2. http://localhost:8080 — dashboard sa Socket.IO connected pilulom + live alertima
+3. `docker logs -f iots-analytics` (10 sekundi) — vidiš `[PREDICTIVE ALERT] ...` u realnom vremenu
+4. http://localhost:8000/docs → `/predict` primer → 200
+5. `docker stop iots-maas` → nazad na dashboard → alerti sada CEP-only (nema plavog forecast dot)
+6. `docker start iots-maas` → alerti opet imaju forecast
+
+**Verifikacija E2E — inline komande za copy/paste:**
+
+```powershell
 # Analytics /stats — buffer depth + eventsByType
-curl -s localhost:3003/stats | python -m json.tool
+curl http://localhost:3003/stats
 
 # MaaS model card
-curl -s localhost:8000/model/info | python -m json.tool
+curl http://localhost:8000/model/info
 
-# Alertovi u realnom vremenu
-docker logs -f iots-analytics | grep "PREDICTIVE ALERT"
+# Alertovi u realnom vremenu (Ctrl+C za izlazak)
+docker logs -f iots-analytics | Select-String "PREDICTIVE ALERT"
 
-# Sirovi eKuiper eventi
-docker exec iots-mosquitto mosquitto_sub -t 'sensors/events' -v
+# Sirovi eKuiper eventi (izlazi posle 5 poruka)
+docker exec iots-mosquitto mosquitto_sub -t "sensors/events" -C 5
 
 # Web app snapshot
-curl -s "localhost:3003/api/alerts?limit=5" | python -m json.tool
+curl "http://localhost:3003/api/alerts?limit=5"
 
-# Predict ručno (poziv koji Analytics interno pravi)
-curl -X POST localhost:8000/predict -H 'Content-Type: application/json' -d '{
+# Predict ručno (isti poziv koji Analytics interno pravi)
+curl -X POST http://localhost:8000/predict `
+  -H "Content-Type: application/json" `
+  -d '{
   "device":"1c:bf:ce:15:ec:4d",
   "history":[
     {"avg_temp":25.1,"avg_humidity":42.0,"avg_co":0.006,"max_temp":26.0},
