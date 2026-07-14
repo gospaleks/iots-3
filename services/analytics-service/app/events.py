@@ -21,7 +21,7 @@ from collections import defaultdict, deque
 from typing import Any
 
 from .config import Config
-from .contracts import WINDOW_METRICS, Event, ReceivedMeta
+from .contracts import HIGH_CO, WINDOW_METRICS, Event, ReceivedMeta
 from .maas_client import MaasClient
 from .metrics import Metrics
 from .socketio_server import SioBus
@@ -62,7 +62,7 @@ class EventProcessor:
             return
 
         # 2. event-of-interest — enrich with MaaS forecast, emit alert.
-        if event_type == "HIGH_CO":
+        if event_type == HIGH_CO:
             log.info(
                 "[EVENT] HIGH_CO       device=%s co=%.5f temp=%.1f",
                 device, _f(event.get("co")), _f(event.get("temp")),

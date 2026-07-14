@@ -16,8 +16,11 @@ EVENTS_TOPIC = "sensors/events"
 
 # event_type discriminator values (see shared/message-contract.md).
 WINDOW_METRICS = "WINDOW_METRICS"   # continuous rollup — feeds the forecast buffer + chart
-# event-of-interest types (threshold now; more in Phase 6):
-HIGH_CO = "HIGH_CO"
+# Event-of-interest types. Routing in events.py is generic — anything that is not
+# WINDOW_METRICS gets enriched — so these exist for documentation + log formatting.
+HIGH_CO = "HIGH_CO"                            # per-message threshold (Phase 1)
+SUSTAINED_HIGH_TEMP = "SUSTAINED_HIGH_TEMP"    # windowed HAVING AVG(temp) (Phase 6)
+HEAT_DRYING = "HEAT_DRYING"                    # multi-condition correlation (Phase 6)
 
 # Aggregate fields carried by every WINDOW_METRICS event (and the interest events
 # that reuse the rollup shape). Buffered verbatim and forwarded to MaaS in Phase 5.

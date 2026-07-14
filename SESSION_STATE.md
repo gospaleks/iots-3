@@ -12,11 +12,19 @@
 
 ## Current position
 
-- **Iteration:** 🎉 **ALL PHASES (0–8) COMPLETE — project delivered.**
-- **Next action:** none from the phase plan. If a future iteration is scoped, either extend
+- **Iteration:** 🎉 **ALL PHASES (0–8) COMPLETE — project delivered.** Post-delivery code
+  review (2026-07-13) done: one webapp chart fix + contracts doc-parity fix, uncommitted.
+- **Next action:** commit the review fixes. If a future iteration is scoped, either extend
   the eKuiper rule set (a rate-of-change / spike rule), improve the chart (rolling MAE), or
   add a Grafana dashboard fed by TimescaleDB.
-- **Last action:** Phase 8 delivery — full E2E gate green on fresh clean-boot with a single
+- **Last action (2026-07-13):** cross-review of colleague's Phases 5–8. Confirmed the
+  suspected "Analytics only handles HIGH_CO" is a false alarm (routing is generic: every
+  non-WINDOW_METRICS event is enriched; the HIGH_CO `if` only picks the log format). Fixed:
+  (a) `ForecastChart.tsx` plotted the next-window forecast at the *triggering* window's
+  `window_end` — now shifted one window forward so predicted-vs-actual align; (b) added
+  `SUSTAINED_HIGH_TEMP`/`HEAT_DRYING` constants to `contracts.py` + use `HIGH_CO` constant
+  in `events.py`. Verified: `py_compile` green, `npm run build` (tsc + vite) green.
+- **Previous action:** Phase 8 delivery — full E2E gate green on fresh clean-boot with a single
   `docker compose --profile mqtt --profile app --profile cep --profile ml --profile web up -d`:
   Ingestion publishing 1000 msg/s, Storage writing to Timescale, eKuiper all 4 rules `running`
   (window_metrics + high_co + sustained_high_temp + heat_drying), Analytics buffer 4/4 across

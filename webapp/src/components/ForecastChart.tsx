@@ -39,7 +39,17 @@ export function ForecastChart({
       }));
     const forecasts = alerts
       .filter((a) => a.device === target && a.forecast_next_avg_temp != null)
-      .map((a) => ({ ts: a.window_end ?? a.ts * 1000, forecast_next_avg_temp: a.forecast_next_avg_temp }));
+      .map((a) => {
+        // The forecast targets the NEXT window — shift one window length forward so it
+        // lands on the window_end of the actual point it predicts (tumbling windows are
+        // contiguous). Alerts without window info (e.g. per-message HIGH_CO) stay at ts.
+        const winMs =
+          a.window_end != null && a.window_start != null ? a.window_end - a.window_start : 0;
+        return {
+          ts: (a.window_end ?? a.ts * 1000) + winMs,
+          forecast_next_avg_temp: a.forecast_next_avg_temp,
+        };
+      });
 
     // Merge series by timestamp (bucket coarsely by seconds).
     const merged: Record<string, any> = {};

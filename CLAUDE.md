@@ -79,6 +79,33 @@ developer can resume with zero context. **Commit only when the user asks.**
 
 ## Change log
 
+### Post-delivery cross-review of Phases 5–8 — 2026-07-13
+- **Reviewed** the colleague-authored commits (`e6231e8`, `5429648`): Analytics orchestration
+  (events/maas_client/socketio_server/main), eKuiper Phase-6 rules + provision.sh, compose,
+  MaaS app, and the whole webapp.
+- **Suspicion "Analytics only consumes HIGH_CO" — false alarm.** Routing in `events.py` is
+  generic: everything that is not `WINDOW_METRICS` goes through `_enrich_and_emit()`; the
+  `HIGH_CO` branch only selects the log-line format. `SUSTAINED_HIGH_TEMP`/`HEAT_DRYING`
+  are consumed and enriched.
+- **Fixed — ForecastChart off-by-one-window:** the next-window forecast was plotted at the
+  triggering window's `window_end`, so predicted-vs-actual compared forecast(t+1) with
+  actual(t). Now shifted forward by `window_end - window_start` (alerts without window info,
+  e.g. per-message HIGH_CO, keep the `ts` fallback) — the forecast dot also now correctly
+  leads the actual line ("pre-emptive" reads visually).
+- **Fixed — contracts doc parity:** added `SUSTAINED_HIGH_TEMP`/`HEAT_DRYING` constants to
+  `contracts.py` (the missing constants were what made the diff *look* HIGH_CO-only) and
+  switched `events.py` to the `HIGH_CO` constant.
+- **Noted, not changed:** (1) MaaS calls are awaited serially in the consume loop — a slow
+  (not down) MaaS at ~1s/call could back up under the ~33 SUSTAINED_HIGH_TEMP events per 10s
+  window; down-MaaS is instant-fail and verified fine. (2) If an interest event beats its
+  window's `WINDOW_METRICS` over MQTT, the forecast is based on a buffer ending one window
+  earlier — inherent ordering, harmless. (3) `webapp` has no committed `package-lock.json`
+  and the Dockerfile uses `npm install` (caret ranges) — builds aren't fully reproducible;
+  consider committing a lockfile + `npm ci`.
+- **Verify:** `python3 -m py_compile` on touched modules green; `npm run build`
+  (tsc -b + vite) green.
+- **Commit (proposed):** `fix(review): align forecast chart to predicted window + contracts parity for Phase-6 event types`
+
 ### Phase 8 — Delivery: E2E gate + README + objasnjenje.md — 2026-07-12
 - **Full pipeline on one command:** `docker compose -f docker/docker-compose.yml --profile mqtt
   --profile app --profile cep --profile ml --profile web up -d` → 9 containers healthy
