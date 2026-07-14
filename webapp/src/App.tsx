@@ -1,7 +1,6 @@
 import * as React from "react"
 
 import { useLiveStreams } from "@/hooks/use-live-streams"
-import { deriveWindowInfo } from "@/lib/window"
 import {
   Card,
   CardAction,
@@ -33,17 +32,12 @@ export function App() {
     if (!device && devices.length > 0) setDevice(devices[0])
   }, [device, devices])
 
-  const windowInfo = React.useMemo(
-    () => deriveWindowInfo(live.events),
-    [live.events],
-  )
-
   return (
     <div className="mx-auto flex min-h-svh w-full max-w-6xl flex-col gap-5 p-4 sm:p-6">
       <StatusHeader
         connected={live.connected}
         deviceCount={devices.length}
-        windowInfo={windowInfo}
+        windowInfo={live.windowInfo}
       />
 
       <PipelineRail

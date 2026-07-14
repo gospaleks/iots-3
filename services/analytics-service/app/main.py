@@ -23,6 +23,7 @@ from .events import EventProcessor
 from .maas_client import MaasClient
 from .metrics import Metrics
 from .socketio_server import SioBus
+from .window_info import window_info
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("analytics")
@@ -99,6 +100,8 @@ async def stats() -> dict:
         "eventsTopic": cfg.events_topic,
         "lagWindows": cfg.lag_windows,
         "maasUrl": cfg.maas_url,
+        "window": window_info(cfg),
+        "window": window_info(cfg),
         "bufferDepthByDevice": processor.buffer_depths(),
         **metrics.snapshot(),
         **_sio_bus.stats(),
@@ -125,6 +128,13 @@ async def api_forecast(device: str, limit: int = Query(100, ge=1, le=1000)) -> l
 async def api_devices() -> dict:
     processor: EventProcessor = fastapi_app.state.processor
     return {"devices": sorted(processor.buffer_depths().keys())}
+
+
+# eKuiper's window config, echoed from the `.env` that also provisions it. Reads only
+# state.cfg (set at import), so unlike /api/devices it answers before lifespan startup.
+@fastapi_app.get("/api/window")
+async def api_window() -> dict:
+    return window_info(fastapi_app.state.cfg)
 
 
 # ─── ASGI: Socket.IO wraps FastAPI so both share the port. Uvicorn serves THIS. ─

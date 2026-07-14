@@ -27,8 +27,10 @@ boundary, or one-per-message under a sliding window) never thrashes React.
 
 The forecast chart (`src/components/forecast-chart.tsx`) plots actual vs. forecast on
 one numeric time axis, bucketed to the second, so it stays readable under **tumbling,
-hopping, or sliding** windows. The window mode is inferred live from the events
-(`src/lib/window.ts`) and shown in the header.
+hopping, or sliding** windows. The active window is fetched once from Analytics
+(`GET /api/window`) and shown in the header — Analytics echoes the same `WINDOW_*` keys
+that provision eKuiper, so changing the window means restarting the stack and reloading
+the page.
 
 ## Develop
 

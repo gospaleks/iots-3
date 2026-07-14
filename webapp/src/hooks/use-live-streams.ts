@@ -12,8 +12,10 @@ import {
   connectSocket,
   fetchAlerts,
   fetchEvents,
+  fetchWindow,
   type CepEvent,
   type EnrichedAlert,
+  type WindowInfo,
 } from "@/lib/api"
 
 const MAX_EVENTS = 400
@@ -24,6 +26,8 @@ const RATE_WINDOW_MS = 5000
 export interface LiveStreams {
   events: CepEvent[]
   alerts: EnrichedAlert[]
+  /** null until the config fetch lands (or if Analytics is unreachable). */
+  windowInfo: WindowInfo | null
   connected: boolean
   eventsPerSec: number
   totalEvents: number
@@ -34,6 +38,7 @@ export interface LiveStreams {
 export function useLiveStreams(): LiveStreams {
   const [events, setEvents] = React.useState<CepEvent[]>([])
   const [alerts, setAlerts] = React.useState<EnrichedAlert[]>([])
+  const [windowInfo, setWindowInfo] = React.useState<WindowInfo | null>(null)
   const [connected, setConnected] = React.useState(false)
   const [eventsPerSec, setEventsPerSec] = React.useState(0)
   const [totals, setTotals] = React.useState({ events: 0, alerts: 0, forecasts: 0 })
@@ -49,6 +54,8 @@ export function useLiveStreams(): LiveStreams {
     // Seed from REST so the dashboard isn't blank before the first socket flush.
     fetchEvents().then((e) => !cancelled && setEvents(e.slice(-MAX_EVENTS))).catch(() => {})
     fetchAlerts().then((a) => !cancelled && setAlerts(a.slice(-MAX_ALERTS))).catch(() => {})
+    // One-shot: eKuiper's window config only changes with a restart of the stack.
+    fetchWindow().then((w) => !cancelled && setWindowInfo(w)).catch(() => {})
 
     const socket = connectSocket()
     socket.on("connect", () => setConnected(true))
@@ -90,6 +97,7 @@ export function useLiveStreams(): LiveStreams {
   return {
     events,
     alerts,
+    windowInfo,
     connected,
     eventsPerSec,
     totalEvents: totals.events,

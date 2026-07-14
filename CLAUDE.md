@@ -79,6 +79,51 @@ developer can resume with zero context. **Commit only when the user asks.**
 
 ## Change log
 
+### Window badge reads config via `GET /api/window` (retires the derived inference) — 2026-07-15
+- **Why:** `webapp/src/lib/window.ts` (`deriveWindowInfo`) reconstructed the window mode from
+  observed `window_end − window_start` because "Analytics doesn't know eKuiper's config". **That
+  premise was wrong** — `analytics` already has `env_file: .env` (compose:108), so the same
+  `WINDOW_*` keys that feed `ekuiper-provision` were already in its environment, just unread.
+- **New `GET /api/window`** (+ `window` in the `/stats` echo): `config.py` reads
+  `WINDOW_TYPE/UNIT/SIZE/STEP`; new **`app/window_info.py`** resolves the unit to seconds and
+  builds the label, so the frontend holds no eKuiper vocabulary. Payload: `{type, unit, size,
+  step, width_sec, step_sec, overlapping, label}`. Reads only `state.cfg` (set at import) ⇒
+  answers before lifespan startup, unlike `/api/devices`. Analytics still does **zero** windowing
+  (D9) — this is a config echo, and the compose `environment:` block now lists the WINDOW_* keys
+  explicitly (mirroring `ekuiper-provision`) so the shared-source story is visible.
+- **Wins over the derived approach:** correct on **first paint** (not after N windows); immune to
+  the merged-window bug below (which forced the p25 hack); and it can finally name
+  `sliding`/`session`/`count`, which inference collapsed into tumbling/hopping. **Cost:** an
+  `.env` change needs an Analytics restart + page reload (accepted).
+- **`window.ts` deleted**; `use-live-streams.ts` seeds `windowInfo` one-shot alongside the
+  events/alerts snapshots (same `cancelled`-guard + swallow-error pattern); `status-header.tsx`
+  takes `WindowInfo | null` and shows `window …` while the fetch is in flight or Analytics is down.
+- **🐛 Found by verification — the inline-comment landmine.** Analytics crash-looped on first boot:
+  `ValueError: invalid literal for int(): '# REQUIRED for hopping/session...'`. **Compose's dotenv
+  parser only strips an inline `# …` when the key HAS a value** — on `WINDOW_STEP=   # comment`
+  the *comment becomes the value*. Fixed in three places: (1) `docker/.env` + `.env.example` move
+  the comment to its own line (with a warning not to move it back); (2) `config.py` strips an
+  inline `#` and parses leniently (`_int_or_none` warns + falls back — eKuiper's config must never
+  crash-loop the orchestrator, the principle I'd violated with a bare `int()`); (3) **`provision.sh`
+  had the same latent bug, worse**: `require_step`'s `[ -n "$WINDOW_STEP" ]` sees the *comment* as
+  non-empty ⇒ the 2026-07-14 fail-fast never fires and it builds
+  `HOPPINGWINDOW(ss, 10, # REQUIRED…)` ⇒ cryptic SQL error instead of the friendly message. Now
+  stripped at read time.
+- **Verify (full stack, all 5 profiles, `--build`):** 9 containers up, eKuiper 4/4 rules `running`;
+  `/api/window` + `/stats.window` → `tumbling · 10s`; webapp `:8080` HTTP 200, CORS 200, and the
+  **served bundle** contains `/api/window` with no trace of `deriveWindowInfo`; `npm run build`
+  green. **Switch tested live:** `.env` → `hopping`/`WINDOW_STEP=5`, re-provision ⇒ `/api/window`
+  reads `hopping · 10s / 5s` and eKuiper's registered SQL reads `HOPPINGWINDOW(ss, 10, 5)` — config
+  and ground truth agree; restored to `tumbling` and re-verified both. Pipeline still healthy
+  (3 devices, SUSTAINED_HIGH_TEMP + HEAT_DRYING, `MaaS=next 22.0°C | pre-emptive`); Analytics
+  stopped ⇒ `/api/window` unreachable and the hook's `.catch()` leaves the badge at `…`.
+- **Docs:** `shared/message-contract.md` gains a real **Snapshots** section (all five `/api/*`
+  routes were code-only despite `main.py` citing the spec); `shared/thresholds.md` consequence #1
+  rewritten (web app no longer affected); `webapp/README.md`; `objasnjenje.md` §5c badge row —
+  ⚠️ it explicitly defended the *opposite* ("app ovo *ne čita iz konfiguracije*"), now rewritten
+  to the shared-`.env` story; `SESSION_STATE.md`.
+- **Commit (proposed):** `feat(analytics): serve eKuiper window config on /api/window; retire derived inference`
+
 ### Webapp rewrite on shadcn/ui + demo-calibrated env + window switchability — 2026-07-14
 - **Why:** the Phase-7 webapp was plain React+Tailwind with hardcoded hex, unclear information
   design; `.env` was tuned so every rule fired constantly (spam); and switching to a sliding

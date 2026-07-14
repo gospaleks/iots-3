@@ -111,6 +111,12 @@ services:
       MAAS_TIMEOUT_MS: "${MAAS_TIMEOUT_MS:-1000}"
       LAG_WINDOWS: "${LAG_WINDOWS:-4}"
       SOCKETIO_CORS_ORIGINS: "${SOCKETIO_CORS_ORIGINS:-*}"
+      # Same keys ekuiper-provision builds the GROUP BY clause from — Analytics only
+      # serves them back on /api/window so the dashboard can show the active window.
+      WINDOW_TYPE: "${WINDOW_TYPE:-tumbling}"
+      WINDOW_UNIT: "${WINDOW_UNIT:-ss}"
+      WINDOW_SIZE: "${WINDOW_SIZE:-10}"
+      WINDOW_STEP: "${WINDOW_STEP:-}"
     ports:
       - "${ANALYTICS_PORT:-3003}:3003"   # /health /stats /api/* /socket.io
     restart: unless-stopped              # tolerate starting before the broker is ready

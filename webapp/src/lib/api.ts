@@ -43,6 +43,19 @@ export interface EnrichedAlert {
   decision_time_ms?: number
 }
 
+/** eKuiper's active window config, echoed by Analytics from the shared `.env`.
+ *  Durations are null for a COUNTWINDOW (which counts messages, not time). */
+export interface WindowInfo {
+  type: string
+  unit: string | null
+  size: number
+  step: number | null
+  width_sec: number | null
+  step_sec: number | null
+  overlapping: boolean
+  label: string
+}
+
 // ─── Event-type metadata (plain-English, for a live audience) ────────────────
 
 export type Severity = "routine" | "notable" | "critical"
@@ -138,6 +151,8 @@ export const fetchAlerts = (limit = 100) =>
 
 export const fetchDevices = () =>
   getJSON<{ devices: string[] }>("/api/devices").then((r) => r.devices)
+
+export const fetchWindow = () => getJSON<WindowInfo>("/api/window")
 
 // ─── Socket.IO ──────────────────────────────────────────────────────────────
 

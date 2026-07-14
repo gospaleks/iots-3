@@ -14,7 +14,10 @@ BROKER_URL="${BROKER_URL:-tcp://mosquitto:1883}"
 WINDOW_TYPE="${WINDOW_TYPE:-tumbling}"
 WINDOW_UNIT="${WINDOW_UNIT:-ss}"
 WINDOW_SIZE="${WINDOW_SIZE:-10}"
-WINDOW_STEP="${WINDOW_STEP:-}"
+# Strip an inline `# ...` comment + surrounding blanks: compose's dotenv parser only drops
+# those when the key HAS a value, so an empty `WINDOW_STEP=  # required for hopping` arrives
+# as the comment text — non-empty, so require_step below would pass it straight into the SQL.
+WINDOW_STEP="$(printf '%s' "${WINDOW_STEP:-}" | sed -e 's/#.*$//' -e 's/[[:space:]]//g')"
 CO_HIGH="${CO_HIGH:-0.010}"
 SUSTAINED_TEMP="${SUSTAINED_TEMP:-25.0}"
 TEMP_HIGH="${TEMP_HIGH:-28.0}"

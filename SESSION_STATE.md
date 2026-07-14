@@ -124,9 +124,10 @@ Legend: ⬜ NOT STARTED · 🟨 IN PROGRESS · ✅ DONE · ⛔ BLOCKED
   10s (n≈100) and 20s (n≈198) windows on a 30s cycle. **Ruled out:** load (~1 % CPU), inter-rule
   interference (reproduces with the other windowed rules stopped — single rule alone), our SQL/env
   (registered SQL clean; stream = processing time, no `TIMESTAMP` option). **No data lost**
-  (100+198 ≈ 300 msg/30s; windows contiguous). **Mitigated in the web app** (`deriveWindowInfo`
-  uses the 25th percentile, since merging only lengthens windows ⇒ badge correctly reads
-  `tumbling · 10s`). **Accepted for MaaS:** ~half the rollups span 20s though the model was
+  (100+198 ≈ 300 msg/30s; windows contiguous). **No longer affects the web app** (2026-07-15): the
+  header badge reads the configured window from `GET /api/window` instead of inferring it from
+  observed widths, so merged windows can't skew it (the old `deriveWindowInfo` needed a
+  25th-percentile hack for exactly this). **Accepted for MaaS:** ~half the rollups span 20s though the model was
   trained on 10s ⇒ mild train/serve skew; predictions stay sensible (slow-moving signal). Revisit
   only if forecast accuracy matters more than the demo — would need an eKuiper-level fix
   (event-time windows via a `TIMESTAMP` stream option, or a newer eKuiper).
@@ -154,8 +155,8 @@ Legend: ⬜ NOT STARTED · 🟨 IN PROGRESS · ✅ DONE · ⛔ BLOCKED
   - **Burst/window resilience:** socket messages buffer in a ref, flush every 400 ms ⇒ **one
     render per flush** at any arrival rate. Chart: both series on **one numeric time axis**,
     bucketed to the second, bounded by an 8-min **time range** (not a point count) — no exact-key
-    merge (that was the tumbling-only assumption that broke). Window mode is **inferred from the
-    data** (`src/lib/window.ts`) and shown in the header, so a live switch is visible.
+    merge (that was the tumbling-only assumption that broke). Window mode was **inferred from the
+    data** (`src/lib/window.ts`) and shown in the header — superseded 2026-07-15 by `/api/window`.
   - **`ekuiper/provision.sh`:** fail-fast (exit 1) when `hopping`/`session` lack `WINDOW_STEP`
     (previously emitted `HOPPINGWINDOW(ss, 10, )` ⇒ rule POST failed ⇒ silently broken CEP);
     `sliding` now warns that per-message emission is by design.

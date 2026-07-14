@@ -6,12 +6,12 @@ import {
 } from "@phosphor-icons/react"
 
 import { Badge } from "@/components/ui/badge"
-import type { WindowInfo } from "@/lib/window"
+import type { WindowInfo } from "@/lib/api"
 
 interface StatusHeaderProps {
   connected: boolean
   deviceCount: number
-  windowInfo: WindowInfo
+  windowInfo: WindowInfo | null
 }
 
 export function StatusHeader({
@@ -38,7 +38,7 @@ export function StatusHeader({
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant="outline" className="gap-1.5">
           <GaugeIcon size={12} weight="bold" />
-          window {windowInfo.label}
+          window {windowInfo?.label ?? "…"}
         </Badge>
         <Badge variant="outline">{deviceCount} devices</Badge>
         <Badge variant={connected ? "default" : "destructive"} className="gap-1.5">

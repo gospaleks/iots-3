@@ -108,10 +108,12 @@ cycle). Verified it is **not** ours to fix:
 
 Consequences, both accepted:
 
-1. **Web app:** a merged window is twice as wide, so a *median* of the observed widths lands on
-   15–20 s and the header would lie. `deriveWindowInfo` therefore uses the **25th percentile** —
-   merging can only make a window *longer* than configured, so the low end is the true setting
-   (p25 also ignores the one short partial window emitted at rule start). Badge reads `10s`. ✅
+1. **Web app: not affected** — the header badge reads the *configured* window from Analytics
+   (`GET /api/window`), which echoes the same `WINDOW_*` keys compose feeds `ekuiper-provision`.
+   It used to infer the window from observed `window_end − window_start`, which this bug made
+   awkward (a merged window is twice as wide, so a median landed on 15–20 s and the badge lied;
+   it needed a 25th-percentile hack to read `10s`). Reading the config sidesteps the bug entirely
+   and is correct on first paint instead of after a few windows. ✅
 2. **MaaS:** roughly half the rollups cover 20 s while the model was trained on 10 s aggregates —
    a mild train/serve skew on those samples (an avg over 20 s ≈ an avg over 10 s for a
    slow-moving signal, so predictions stay sensible; `R²=0.988` was measured on clean 10 s

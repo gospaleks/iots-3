@@ -406,7 +406,7 @@ opet imaju `MaaS=next X.X°C`.
 |---|---|
 | `Live` (zeleno) / `Offline` (crveno) | Socket.IO konekcija ka Analytics-u. Ako je `Offline`, Analytics je pao ili je CORS pogrešan — podaci na ekranu su tada stari. |
 | `3 devices` | Koliko različitih uređaja je viđeno u stream-u. Sa `NUM_DEVICES=3` očekuješ 3. |
-| `window tumbling · 10s` | **Koji eKuiper window je aktivan** — app ovo *ne čita iz konfiguracije*, nego **zaključuje iz samih podataka**: širina = `window_end − window_start`, korak = razmak između uzastopnih `window_start`. Ako prebaciš na hopping, badge sam postane `window hopping · 10s / 5s`. Dobar "gotcha" odgovor ako te pitaju kako znaš da je promena stvarno primenjena. |
+| `window tumbling · 10s` | **Koji eKuiper window je aktivan** — app ga čita iz `GET /api/window`. Compose hrani i `analytics` i `ekuiper-provision` iz **istog `.env`-a**, pa Analytics prijavljuje tačno onaj `WINDOW_TYPE`/`WINDOW_SIZE`/`WINDOW_STEP` od koga je `provision.sh` sagradio `GROUP BY` klauzulu — iako sam Analytics ne radi nikakvo prozorisanje (D9). Ako prebaciš na hopping i restartuješ stack, badge posle refresh-a čita `window hopping · 10s / 5s`. |
 
 ### Pipeline rail (traka sa 4 faze) — *signature* element
 

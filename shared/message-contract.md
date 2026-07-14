@@ -47,6 +47,32 @@ The raw topic name is configurable via the `TOPIC` env var, the events topic via
 **The browser never speaks MQTT** — the web app consumes live data over Socket.IO from Analytics
 and pulls snapshots over REST (D11). There is no `ui/alerts` MQTT topic.
 
+### Snapshots (`GET /api/*`, served by Analytics)
+
+| Route | Returns |
+|-------|---------|
+| `/api/events?limit=` | last N `sensors/events` payloads (default 50, max 1000), oldest-first |
+| `/api/alerts?limit=` | last N enriched alerts (default 50, max 1000), oldest-first |
+| `/api/forecast/{device}?limit=` | per-device `{ts, actual_avg_temp, forecast_next_avg_temp, forecast_available, event_type}` history |
+| `/api/devices` | `{"devices": [...]}` — devices seen so far |
+| `/api/window` | eKuiper's **configured** window (below) |
+
+`GET /api/window` — Analytics and `ekuiper-provision` are fed the same `WINDOW_*` keys from
+compose's `.env`, so Analytics can report the window eKuiper was provisioned with. It performs
+no windowing itself (D9); this is a config echo with the unit resolved to seconds:
+
+```json
+{ "type": "tumbling", "unit": "ss", "size": 10, "step": null,
+  "width_sec": 10, "step_sec": null, "overlapping": false, "label": "tumbling · 10s" }
+```
+
+`width_sec`/`step_sec` are `null` for `count` windows (which count messages, not time), `step`
+is `null` unless `WINDOW_STEP` is set. Changing the window means restarting Analytics **and**
+re-running `ekuiper-provision`, then reloading the page — the value is read once at startup.
+**Not derived from the event stream**: eKuiper 2.2.1 occasionally merges two windows into one
+double-width emission (see [thresholds.md](thresholds.md)), so observed widths lie; the config
+does not.
+
 ## Downstream contracts (P3)
 
 The raw payload above is produced by Ingestion. eKuiper aggregates it into *tagged window
