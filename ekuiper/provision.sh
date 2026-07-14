@@ -25,11 +25,25 @@ TMP=/tmp/ekuiper
 mkdir -p "$TMP"
 
 # --- Build the GROUP BY window clause from env (D6). eKuiper v2 signatures. ---
+# hopping/session need a step/gap argument — an empty WINDOW_STEP would emit
+# malformed SQL like HOPPINGWINDOW(ss, 10, ) that eKuiper rejects at rule POST,
+# so the pipeline would silently come up with a broken rule. Fail fast instead.
+require_step() {
+  [ -n "$WINDOW_STEP" ] || {
+    echo "[provision] WINDOW_TYPE=$WINDOW_TYPE requires WINDOW_STEP (e.g. WINDOW_STEP=5)" >&2
+    exit 1
+  }
+}
 case "$WINDOW_TYPE" in
   tumbling) WIN="TUMBLINGWINDOW($WINDOW_UNIT, $WINDOW_SIZE)";;
-  hopping)  WIN="HOPPINGWINDOW($WINDOW_UNIT, $WINDOW_SIZE, $WINDOW_STEP)";;
-  sliding)  WIN="SLIDINGWINDOW($WINDOW_UNIT, $WINDOW_SIZE${WINDOW_STEP:+, $WINDOW_STEP})";;
-  session)  WIN="SESSIONWINDOW($WINDOW_UNIT, $WINDOW_SIZE, $WINDOW_STEP)";;
+  hopping)  require_step; WIN="HOPPINGWINDOW($WINDOW_UNIT, $WINDOW_SIZE, $WINDOW_STEP)";;
+  sliding)
+    # SLIDINGWINDOW re-evaluates on EVERY incoming message (one emit per message
+    # per device), so it is inherently high-volume on this stream — use `hopping`
+    # for a stepped overlapping-window demo. WINDOW_STEP here is a delay, not a hop.
+    echo "[provision] WARNING: sliding window emits per incoming message (high volume by design)." >&2
+    WIN="SLIDINGWINDOW($WINDOW_UNIT, $WINDOW_SIZE${WINDOW_STEP:+, $WINDOW_STEP})";;
+  session)  require_step; WIN="SESSIONWINDOW($WINDOW_UNIT, $WINDOW_SIZE, $WINDOW_STEP)";;
   count)    WIN="COUNTWINDOW($WINDOW_SIZE${WINDOW_STEP:+, $WINDOW_STEP})";;
   *) echo "[provision] unknown WINDOW_TYPE=$WINDOW_TYPE" >&2; exit 1;;
 esac

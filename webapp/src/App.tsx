@@ -1,61 +1,88 @@
-import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { StatusBar } from "./components/StatusBar";
-import { EventFeed } from "./components/EventFeed";
-import { AlertFeed } from "./components/AlertFeed";
-import { ForecastChart } from "./components/ForecastChart";
-import { DeviceSelector } from "./components/DeviceSelector";
-import { fetchAlerts, fetchDevices, fetchEvents } from "./api";
-import { useLiveStreams } from "./hooks/useLiveStreams";
+import * as React from "react"
 
-export default function App() {
-  // Initial snapshots from REST — seed the UI so it looks alive on first paint.
-  const eventsQ = useQuery({ queryKey: ["events"], queryFn: () => fetchEvents(150) });
-  const alertsQ = useQuery({ queryKey: ["alerts"], queryFn: () => fetchAlerts(80) });
-  const devicesQ = useQuery({
-    queryKey: ["devices"],
-    queryFn: fetchDevices,
-    refetchInterval: 5000,
-  });
+import { useLiveStreams } from "@/hooks/use-live-streams"
+import { deriveWindowInfo } from "@/lib/window"
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import { PipelineRail } from "@/components/pipeline-rail"
+import { StatusHeader } from "@/components/status-header"
+import { DeviceSelect } from "@/components/device-select"
+import { ForecastChart } from "@/components/forecast-chart"
+import { EventFeed } from "@/components/event-feed"
+import { AlertFeed } from "@/components/alert-feed"
 
-  const { events, alerts, connected } = useLiveStreams(eventsQ.data ?? [], alertsQ.data ?? []);
+export function App() {
+  const live = useLiveStreams()
+  const [device, setDevice] = React.useState<string | null>(null)
 
-  const devices = useMemo(() => {
-    const set = new Set<string>(devicesQ.data ?? []);
-    for (const e of events) if (e.device) set.add(e.device);
-    return Array.from(set).sort();
-  }, [devicesQ.data, events]);
+  const devices = React.useMemo(() => {
+    const set = new Set<string>()
+    for (const e of live.events) set.add(e.device)
+    for (const a of live.alerts) set.add(a.device)
+    return [...set].sort()
+  }, [live.events, live.alerts])
 
-  const [selected, setSelected] = useState<string | null>(null);
-  useEffect(() => {
-    if (!selected && devices.length > 0) setSelected(devices[0]);
-  }, [devices, selected]);
+  // Auto-select the first device once the stream produces one.
+  React.useEffect(() => {
+    if (!device && devices.length > 0) setDevice(devices[0])
+  }, [device, devices])
+
+  const windowInfo = React.useMemo(
+    () => deriveWindowInfo(live.events),
+    [live.events],
+  )
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <StatusBar connected={connected} deviceCount={devices.length} />
-      <main className="flex-1 p-6 space-y-6 max-w-[1400px] mx-auto w-full">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div className="text-slate-300">
-            <p className="mono text-sm">
-              live via <span className="text-[#4dabf7]">Socket.IO</span> · initial from{" "}
-              <span className="text-[#4dabf7]">REST /api/*</span>
-            </p>
-          </div>
-          <DeviceSelector devices={devices} value={selected} onChange={setSelected} />
-        </div>
+    <div className="mx-auto flex min-h-svh w-full max-w-6xl flex-col gap-5 p-4 sm:p-6">
+      <StatusHeader
+        connected={live.connected}
+        deviceCount={devices.length}
+        windowInfo={windowInfo}
+      />
 
-        <ForecastChart device={selected} events={events} alerts={alerts} />
+      <PipelineRail
+        eventsPerSec={live.eventsPerSec}
+        totalEvents={live.totalEvents}
+        forecasts={live.totalForecasts}
+        totalAlerts={live.totalAlerts}
+      />
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <EventFeed events={events} />
-          <AlertFeed alerts={alerts} />
-        </div>
+      <Card>
+        <CardHeader className="border-b">
+          <CardTitle>Temperature forecast</CardTitle>
+          <CardDescription>
+            Actual window average vs. the MaaS prediction for the next window
+          </CardDescription>
+          <CardAction>
+            <DeviceSelect devices={devices} value={device} onChange={setDevice} />
+          </CardAction>
+        </CardHeader>
+        <CardContent>
+          <ForecastChart
+            device={device}
+            events={live.events}
+            alerts={live.alerts}
+          />
+        </CardContent>
+      </Card>
 
-        <footer className="text-xs text-slate-500 mono text-center pb-6">
-          IoTS Project 3 — Ingestion · Storage · eKuiper CEP · MaaS (RandomForest, next-window avg_temp) · Analytics orchestrator · Web UI
-        </footer>
-      </main>
+      <div className="grid gap-5 lg:grid-cols-2">
+        <EventFeed events={live.events} />
+        <AlertFeed alerts={live.alerts} />
+      </div>
+
+      <footer className="pt-1 pb-4 text-center text-xs text-muted-foreground">
+        Ingestion → eKuiper CEP → MaaS → Analytics · live via Socket.IO, seeded
+        from REST
+      </footer>
     </div>
-  );
+  )
 }
+
+export default App

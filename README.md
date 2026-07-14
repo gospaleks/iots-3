@@ -43,9 +43,10 @@ ingestion (NestJS) ──publish sensors/telemetry──▶ Mosquitto (MQTT) ─
 - **MaaS** — Python + FastAPI; a RandomForest next-window temperature forecaster behind
   `POST /predict`, `GET /health`, `GET /model/info`. *(new — ✅ Phases 3–4; the artifact ships
   in the image, loaded once at startup)*
-- **web app** — React + Vite + Tailwind + TanStack Query + Socket.IO + Recharts; visualizes CEP
-  events, predictive alerts, and MaaS predictions (predicted-vs-actual chart). Non-blocking.
-  *(new — ✅ Phase 7; served by nginx under the `web` profile at :8080)*
+- **web app** — React + Vite + **shadcn/ui** (Base UI, Tailwind v4) + Socket.IO + Recharts;
+  visualizes the pipeline: live CEP event stream, predictive alerts, and the actual-vs-forecast
+  chart. Readable under any window mode. Non-blocking.
+  *(new — ✅ Phase 7, rewritten on shadcn/ui; served by nginx under the `web` profile at :8080)*
 
 The reused services depend only on a broker `BrokerAdapter` interface (Nest DI for the two
 NestJS services, an async mirror in the Python analytics service). Project 3 is MQTT-only.
@@ -62,7 +63,7 @@ NestJS services, an async mirror in the Python analytics service). Project 3 is 
 | Analytics Service (FastAPI) | **Modified** — ✅ Phases 2 + 5 | Consumes `sensors/events`, calls MaaS `/predict` (timeout + CEP-only fallback), emits `[PREDICTIVE ALERT]`, and pushes `event`/`alert` over Socket.IO + REST snapshot routes `/api/*`. |
 | eKuiper (Streaming/CEP) | **New** — ✅ Phases 1 + 6 | `WINDOW_METRICS` rollup + `HIGH_CO` (threshold) + `SUSTAINED_HIGH_TEMP` (windowed HAVING) + `HEAT_DRYING` (multi-condition correlation) → `sensors/events`, REST-provisioned. |
 | MaaS (Model-as-a-Service) | **New** — ✅ Phase 3/4 | RandomForest forecaster (test R²=0.988) behind FastAPI `/predict /health /model/info`; artifact ships in image. |
-| Web app | **New** — ✅ Phase 7 | React+Vite+Tailwind+Socket.IO dashboard: live event feed, predictive alerts, predicted-vs-actual chart. Non-blocking. |
+| Web app | **New** — ✅ Phase 7 | React + shadcn/ui + Socket.IO dashboard: pipeline rail, live event stream with a plain-English legend, predictive alerts, actual-vs-forecast chart. Survives any window mode. Non-blocking. |
 
 ## Repository layout
 
@@ -74,7 +75,7 @@ services/     npm workspaces: libs/{broker,contracts}, ingestion-service, storag
 docker/       docker-compose.yml (mqtt/app/cep profiles), mosquitto/, db/init.sql, .env.example
 maas/         features.py (shared transform), train.py, models/ (trained artifact + metrics); REST service in Phase 4
 ekuiper/      streams/ + rules/ + provision.sh — REST-provisioned CEP layer (Phase 1)
-webapp/       web app (placeholder; Phase 7)
+webapp/       React + shadcn/ui dashboard (src/lib/api.ts, hooks/, components/) — the `web` profile
 ```
 
 ## Tech stack
@@ -136,6 +137,27 @@ Open the dashboard at [`http://localhost:8080`](http://localhost:8080). Live dat
 Socket.IO from Analytics; initial paint uses the `/api/*` REST snapshots so the UI never shows
 a blank state. **Non-blocking:** the pipeline runs whether or not the web app is up.
 
+With the demo defaults (`NUM_DEVICES=3`) each device maps 1:1 onto a dataset profile and each
+CEP rule lights up a *different* one — `1c:bf…` (26.9 °C) fires `SUSTAINED_HIGH_TEMP`,
+`b8:27…` (warm **and** dry) fires `HEAT_DRYING` plus occasional `HIGH_CO`, and `00:0f…` stays
+quiet as the baseline. See [shared/thresholds.md](shared/thresholds.md) for the calibration.
+
+### Switching the eKuiper window
+
+The window is env-templated (no SQL edits). Set it in `docker/.env`, then re-run provisioning:
+
+```bash
+# WINDOW_TYPE=hopping  WINDOW_STEP=5   → 10s windows emitted every 5s (overlapping)
+$C --profile mqtt --profile app --profile cep --profile ml --profile web \
+   up -d --force-recreate ekuiper-provision
+```
+
+The dashboard header shows the mode it infers from the live data (`window tumbling · 10s` →
+`window hopping · 10s / 5s`). `hopping`/`session` **require** `WINDOW_STEP` — provisioning
+fails fast if it's missing. `sliding` is supported but emits **one event per incoming message**
+by design (a flood, not a bug); the web app absorbs it, but `hopping` is the readable demo.
+Keep `WINDOW_SIZE=10` and `LAG_WINDOWS=4` — the MaaS model was trained on those.
+
 ### Service control surface (HTTP)
 
 | Service | Port | Endpoints |
@@ -144,7 +166,7 @@ a blank state. **Non-blocking:** the pipeline runs whether or not the web app is
 | storage   | 3002 | `GET /health`, `GET /stats` (received, stored, conflicts, `seq` integrity, transport latency) |
 | analytics | 3003 | `GET /health`, `GET /stats` (events by type, per-device rollup buffer depth); **Socket.IO** at `/socket.io` (`event`, `alert` channels); **REST snapshots** `/api/events`, `/api/alerts`, `/api/forecast/{device}`, `/api/devices` |
 | maas      | 8000 | `GET /health`, `GET /model/info`, `POST /predict`, `GET /docs` (Swagger) |
-| webapp    | 8080 | React dashboard (event feed, predictive alerts, predicted-vs-actual chart) |
+| webapp    | 8080 | React + shadcn/ui dashboard (pipeline rail, event stream + legend, predictive alerts, actual-vs-forecast chart) |
 
 ```bash
 curl -s localhost:3002/stats | python3 -m json.tool      # storage integrity + latency

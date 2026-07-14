@@ -79,6 +79,77 @@ developer can resume with zero context. **Commit only when the user asks.**
 
 ## Change log
 
+### Webapp rewrite on shadcn/ui + demo-calibrated env + window switchability — 2026-07-14
+- **Why:** the Phase-7 webapp was plain React+Tailwind with hardcoded hex, unclear information
+  design; `.env` was tuned so every rule fired constantly (spam); and switching to a sliding
+  window "showed nothing" on the frontend.
+- **webapp/ rewritten from scratch** — scaffolded with
+  `npx shadcn@latest init --preset b51GFh7y6 --template vite --pointer` (inner `.git` deleted;
+  root repo owns it). Preset resolves to **style `luma`, base `base` (Base UI, *not* Radix —
+  `render` not `asChild`), Tailwind **v4** (tokens in `src/index.css`, no `tailwind.config.js`),
+  Phosphor icons, Public Sans, React 19 + Recharts 3. Components added via CLI (card, badge,
+  table, select, separator, skeleton, scroll-area, tooltip, chart, empty, toggle-group, alert).
+  Semantic tokens only — no raw colors (shadcn skill). **`package-lock.json` committed +
+  Dockerfile uses `npm ci`** (fixes the reproducibility nit from the 2026-07-13 review).
+- **Information design (the actual complaint):** signature **pipeline rail** (Ingestion →
+  eKuiper → MaaS → Alerts with live counters) makes the flow the hero; **always-visible legend**
+  giving each event type a plain-English meaning (projector-friendly — no hover); devices labeled
+  by **profile** ("Cool & humid") not bare MAC; alert cards lead with **now → next + delta badge**
+  (the MaaS value-add); "Events only" toggle hides WINDOW_METRICS noise.
+- **Burst + window resilience (root-caused the "sliding shows nothing"):** socket messages land
+  in a ref and flush on a 400 ms interval ⇒ **one render per flush** regardless of arrival rate.
+  Chart no longer merges the two series on an **exact `window_end` key** (only ever lined up for
+  contiguous tumbling windows — that was the bug): both series now sit on one **numeric time
+  axis**, bucketed to the second, bounded by a **time range** (8 min) not a point count. Works
+  under tumbling *and* hopping; survives a sliding flood.
+- **Window mode is inferred from the data** (`src/lib/window.ts`: width = `window_end−window_start`,
+  step = gap between `window_start`s) and shown in the header — Analytics doesn't know eKuiper's
+  config, so this is derived, and it makes a live window switch visible with zero backend wiring.
+- **⚠️ Found (pre-existing, not introduced here): eKuiper 2.2.1 emits merged windows.** A plain
+  `TUMBLINGWINDOW(ss, 10)` periodically misses a processing-time trigger and emits one 20s window
+  (n≈198) instead of two 10s ones (n≈100) — a steady 10/20 alternation on a 30s cycle. Ruled out
+  load (~1% CPU), inter-rule interference (reproduces with the other windowed rules stopped), and
+  our SQL/env (registered SQL is clean; stream is processing-time). **No data is lost** (100+198 ≈
+  300 msg per 30s; windows stay contiguous). Two consequences: (1) a median of observed widths
+  would make the header badge read `15–20s`, so `deriveWindowInfo` uses the **25th percentile** —
+  merging only ever makes windows *longer*, so the low end is the true config (also ignores the
+  partial window at rule start); verified badge reads `tumbling · 10s`. (2) MaaS gets ~half its
+  rollups over 20s though trained on 10s → mild train/serve skew, accepted (avg over 20s ≈ avg
+  over 10s for this slow signal). Documented in `shared/thresholds.md`.
+- **`provision.sh` fail-fast:** `hopping`/`session` with empty `WINDOW_STEP` used to emit
+  malformed SQL (`HOPPINGWINDOW(ss, 10, )`) ⇒ rule POST failed ⇒ silently broken CEP layer.
+  Now exits 1 with `WINDOW_TYPE=hopping requires WINDOW_STEP (e.g. WINDOW_STEP=5)`; `sliding`
+  prints a warning that per-message emission is by design.
+- **Env recalibrated to 3 devices** (bare MACs 1:1 with dataset profiles; `device.ts` only
+  suffixes when `NUM_DEVICES > 3`), 10 msg/s/device = 30 msg/s (~100 samples/window). Thresholds
+  measured live from TimescaleDB so **each rule lights up a different device**:
+  `SUSTAINED_TEMP=25` → `1c:bf` (26.9 °C); `TEMP_HIGH=22` + `HUMIDITY_LOW=55` → `b8:27`
+  (22.5 °C **and** 50.6 % rh — `1c:bf` is hotter but humid, which is the point of a correlation
+  rule); `00:0f` stays quiet as the baseline. Measured steady-state mix: **WINDOW_METRICS ~60 %,
+  SUSTAINED ~20 %, HEAT_DRYING ~20 %** + episodic HIGH_CO.
+- **`CO_HIGH` gotcha (documented in `shared/thresholds.md`):** `HIGH_CO` is *per-message*, so its
+  rate is `msg/s × P(co > thr)`, and this dataset's CO is a **slow-varying signal** ⇒ a percentile
+  threshold maps to *time episodes*, not random samples. There is no "occasional" value inside
+  `b8:27`'s narrow band (0.0047–0.0051): `0.00502` (p95) ⇒ 17 % of *all* messages ⇒ 95 % of the
+  feed; `0.00508` ⇒ ~1 per 10 s at replay start, quiet later. Settled on **`0.00508`** (spikes
+  should be rare); note the **replay starts in a high-CO episode**, so it shows on a fresh `up`.
+- **Verify (full stack, all 5 profiles, from `--build`):** 9 containers up; eKuiper 4/4 rules
+  `running`; `/api/devices` = exactly the 3 bare MACs; all four event types observed with
+  forecasts landing (`forecast_available` on the alerts); webapp `:8080` HTTP 200 serving the new
+  title + baked `VITE_API_URL`, CORS 200 from the webapp origin; `npm run build` (tsc -b + vite)
+  green. **Window switch tested live:** `hopping`/`WINDOW_STEP=5` → `HOPPINGWINDOW(ss, 10, 5)`,
+  4/4 rules running, measured width 10 s / step 5 s ⇒ frontend label `hopping · 10s / 5s`;
+  empty-step fail-fast returns exit 1. `.env` restored to `tumbling`.
+- **Gotcha for next session:** running `docker compose` with a *subset* of profiles treats the
+  other profiles' containers as orphans and removes them — always pass all five profile flags.
+- **Docs:** `shared/thresholds.md` (per-device calibration table + CO rationale + window-switch
+  section), root `README.md` (new stack, per-device story, window switching), `objasnjenje.md`
+  (new **§5c "Kako se čita dashboard"** — badges, chart, why the forecast line is dashed *and
+  leads*, delta badge, CEP-only fallback, live window-switch demo; §5c/§5d renumbered).
+- **Commit (proposed):** split in two —
+  1. `fix(cep): fail fast on missing WINDOW_STEP + demo-calibrate env for a 3-device pipeline`
+  2. `feat(webapp): rewrite dashboard on shadcn/ui — window-agnostic chart, buffered live streams`
+
 ### Post-delivery cross-review of Phases 5–8 — 2026-07-13
 - **Reviewed** the colleague-authored commits (`e6231e8`, `5429648`): Analytics orchestration
   (events/maas_client/socketio_server/main), eKuiper Phase-6 rules + provision.sh, compose,

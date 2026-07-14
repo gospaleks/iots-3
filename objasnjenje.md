@@ -35,7 +35,7 @@ sve to preko **Socket.IO**.
 | **1b.** Analytics koristi MaaS REST endpoint | `services/analytics-service/app/maas_client.py`, `events.py` (POST /predict + timeout + CEP-only fallback) | ✅ |
 | **2.** eKuiper pretplaćen na isti topic (`sensors/telemetry`) kao P2 Analytics, primenjuje pravila, šalje događaje na novi topic (`sensors/events`) | `ekuiper/streams/sensor_stream.json`, 4 pravila u `ekuiper/rules/` provisionovana **preko REST API** kroz `ekuiper/provision.sh` (bez UI klikova) | ✅ |
 | **3.** MaaS = Python + FastAPI + scikit-learn (regresija na vremenskoj seriji senzora) | `maas/app.py` (FastAPI), `maas/train.py` + `features.py` (scikit-learn RandomForestRegressor, chrono 70/15/15 split, MAE/RMSE/R² na test setu) | ✅ |
-| **4.** Docker kontejneri + Web aplikacija | 9 servisa u `docker-compose.yml`; React+Vite+Tailwind+Socket.IO web app u `webapp/` (kontejner + nginx serve) | ✅ |
+| **4.** Docker kontejneri + Web aplikacija | 9 servisa u `docker-compose.yml`; React + shadcn/ui + Socket.IO web app u `webapp/` (kontejner + nginx serve) | ✅ |
 | **5.** GitHub + opis mikroservisa | Kompletan opis niže; poseban paragraf po servisu | ✅ |
 
 ---
@@ -64,7 +64,7 @@ sve to preko **Socket.IO**.
                                             └─► Socket.IO event/alert kanali + REST /api/*
                                                             │
                                                             ▼
-                                                Web app (React+Vite+Tailwind)
+                                                Web app (React + shadcn/ui)
                                                 • live event feed
                                                 • predictive alert kartice
                                                 • predicted-vs-actual chart (recharts)
@@ -80,11 +80,16 @@ implementacionog plana).
 
 ### 4.1 **Ingestion Service** (NestJS, TypeScript)
 Simulator uređaja i **jedini publisher** sirove telemetrije. Reprodukuje realan
-Kaggle dataset (Environmental Sensor Telemetry Data, ~405k redova, 3 stvarna MAC-a
-fanout-uju se na `NUM_DEVICES=100` simuliranih uređaja kroz `-N` sufiks), stampa svaki
-paket sa `seq` brojačem i `sent_at_ms` timestamp-om, i publikuje na `sensors/telemetry`
-sa `MESSAGES_PER_SECOND=10` po uređaju (1000 msg/s ukupno). **Reused iz Projekta 2**.
+Kaggle dataset (Environmental Sensor Telemetry Data, ~405k redova, 3 stvarna MAC-a),
+stampa svaki paket sa `seq` brojačem i `sent_at_ms` timestamp-om, i publikuje na
+`sensors/telemetry`. **Reused iz Projekta 2**.
 Control endpoints: `/health`, `/stats`, `POST /burst?durationSec=N`.
+
+**Demo podešavanje:** `NUM_DEVICES=3` × `MESSAGES_PER_SECOND=10` = 30 msg/s (≈100 uzoraka po
+10s window-u — dovoljno za smislene agregate, a event feed ostaje čitljiv). Sa 3 uređaja svaki
+dobija **čist MAC bez `-N` sufiksa** (fanout se uključuje tek za `NUM_DEVICES > 3`), pa se na
+frontend-u vide tačno 3 uređaja = 3 profila iz dataset-a. Za demo skaliranja podigni
+`NUM_DEVICES` (npr. 100) — id-evi tada postaju `<mac>-<i>`.
 
 ### 4.2 **Storage Service** (NestJS, TypeORM, TimescaleDB)
 **Jedini pisač u bazu**. Pretplaćen na `sensors/telemetry`, prati `seq` integritet (gaps
@@ -168,21 +173,30 @@ Bio je "tumbling window + threshold alert" u P2; sada je **tanak orkestrator**:
 Control endpoints: `/health`, `/stats` (broker cfg + event counter po tipu + buffer depth po
 uređaju + Socket.IO ring buffer metrike).
 
-### 4.6 **Web app** (React + Vite + TypeScript + Tailwind CSS + TanStack Query + axios + socket.io-client + Recharts, novo u P3)
+### 4.6 **Web app** (React 19 + Vite + TypeScript + **shadcn/ui** (Base UI, Tailwind v4) + socket.io-client + Recharts, novo u P3)
 Fokusiran dashboard koji vizuelizuje **kompletan novi pipeline**:
 
-- **Live** preko Socket.IO (dva kanala): `event` puni event feed i actual liniju na chart-u,
+- **Live** preko Socket.IO (dva kanala): `event` puni event stream i actual liniju na chart-u,
   `alert` puni predictive alert kartice i forecast tačke;
-- **Initial load** preko TanStack Query + axios: `/api/events`, `/api/alerts`, `/api/forecast/:device`,
-  `/api/devices` — dashboard izgleda "živo" na first paint umesto praznog stanja;
-- **Predicted-vs-actual temp chart** (Recharts) — bela linija = actual `avg_temp` (iz WINDOW_METRICS),
-  plava isprekidana = `forecast_next_avg_temp` (iz alert-a). Money shot demo-a.
+- **Initial load** preko REST snapshot ruta (`/api/events`, `/api/alerts`, `/api/devices`) —
+  dashboard izgleda "živo" na first paint umesto praznog stanja;
+- **Actual-vs-forecast temp chart** (Recharts kroz shadcn `Chart`) — puna linija = actual
+  `avg_temp` (iz WINDOW_METRICS), isprekidana + tačke = `forecast_next_avg_temp` (iz alert-a).
+  Money shot demo-a.
+- **Otporan na burst-ove i na promenu window-a** (v2): socket poruke se pufuju u `ref`-u i
+  flush-uju se u state na interval (jedan render po flush-u, bez obzira na dolaznu brzinu),
+  a chart crta obe serije na **numeričkoj vremenskoj osi** sa bucket-om od 1s — pa radi i za
+  `tumbling` i za `hopping`, i preživi `sliding` flood.
 - Non-blocking (D10): kontejner je pod `web` profilom, ništa u pipeline-u `depends_on` webapp;
   ako se gasi, sve i dalje radi.
 
-Runtime: **multi-stage Docker build** — Node builder → nginx-alpine serving statičkog build-a;
-`VITE_API_URL` se **bake-uje na build time** (compose `args: { VITE_API_URL: ... }`) tako da
-je runtime iz nginx-a bez ijedne Node dependency.
+Runtime: **multi-stage Docker build** — Node builder (`npm ci`, lockfile je komitovan) →
+nginx-alpine serving statičkog build-a; `VITE_API_URL` se **bake-uje na build time**
+(compose `args: { VITE_API_URL: ... }`) tako da je runtime iz nginx-a bez ijedne Node dependency.
+
+> UI je pisan po dva skill-a iz `.agents/skills/`: **shadcn** (komponente se dodaju CLI-jem,
+> koriste se isključivo semantički tokeni — nikad sirovi hex) i **frontend-design**.
+> Kako se čita ekran → sekcija [5c](#5c-kako-se-čita-dashboard-šta-koji-element-znači).
 
 ---
 
@@ -307,9 +321,10 @@ curl http://localhost:3003/stats
 ```
 
 Traži:
-- `eventsByType` treba da sadrži bar `WINDOW_METRICS` (posle par sekundi) i `SUSTAINED_HIGH_TEMP`
-  (posle ~40s — jer se javlja samo za `1c:bf:ce:15:ec:4d-*` uređaje kad avg_temp pređe 25°C)
-- `bufferDepthByDevice` — vrednosti 4 (pun buffer) za sve 100 simuliranih uređaja posle ~40s
+- `eventsByType` treba da sadrži `WINDOW_METRICS` (posle par sekundi), pa `SUSTAINED_HIGH_TEMP`
+  (samo za `1c:bf:ce:15:ec:4d`, avg_temp ~26.9°C > 25) i `HEAT_DRYING` (samo za
+  `b8:27:eb:bf:9d:51`, toplo **i** suvo). `HIGH_CO` dolazi povremeno, u naletima.
+- `bufferDepthByDevice` — vrednost 4 (pun buffer) za sva 3 uređaja posle ~40s
 
 ### ✅ 5) [PREDICTIVE ALERT] linije u Analytics log-u (**najvažnija provera**)
 
@@ -317,10 +332,10 @@ Traži:
 docker logs --tail=100 iots-analytics | Select-String "PREDICTIVE ALERT"
 ```
 
-Očekivan format (jedna od ovih varijanti):
+Očekivan format (jedna od ovih varijanti — stvaran output sa 3-device demo podešavanja):
 ```
-[PREDICTIVE ALERT] device=1c:bf:ce:15:ec:4d-82 eKuiper=SUSTAINED_HIGH_TEMP (avg 25.6°C) | MaaS=next 27.6°C | pre-emptive
-[PREDICTIVE ALERT] device=... eKuiper=HIGH_CO (avg 22.3°C) | MaaS=next 22.1°C | pre-emptive
+[PREDICTIVE ALERT] device=1c:bf:ce:15:ec:4d eKuiper=SUSTAINED_HIGH_TEMP (avg 26.9°C) | MaaS=next 27.1°C | pre-emptive
+[PREDICTIVE ALERT] device=b8:27:eb:bf:9d:51 eKuiper=HEAT_DRYING (avg 22.3°C) | MaaS=next 22.2°C | pre-emptive
 ```
 
 Vidiš `| MaaS=next X.X°C | pre-emptive` → **ML predikcija radi**.
@@ -342,21 +357,22 @@ curl "http://localhost:3003/api/events?limit=3"
 curl "http://localhost:3003/api/devices"
 ```
 
-Prvi vraća niz enriched alertova sa `forecast_next_avg_temp` i `message`. Treći listu do 100 device
-id-eva.
+Prvi vraća niz enriched alertova sa `forecast_next_avg_temp` i `message`. Treći listu device
+id-eva (sa demo podešavanjem: 3 čista MAC-a).
 
 ### ✅ 8) Web dashboard — http://localhost:8080
 
-Otvori u browser-u. Trebalo bi da vidiš:
+Otvori u browser-u. Trebalo bi da vidiš (detaljno objašnjenje svakog elementa → **sekcija 5c**):
 
-- **U gornjem desnom uglu:** zelena "Socket.IO connected" pilulica.
-- **U zaglavlju:** "devices seen: 100" (ako je manje, sačekaj još 10s).
-- **CEP event feed** (donji-levi): rolling tabela `WINDOW_METRICS` (sivo) + `HIGH_CO`/`SUSTAINED_HIGH_TEMP` (u boji).
-- **Predictive alerts** (donji-desni): kartice sa `actual = XX.X °C`, `forecast = XX.X °C`, badge
-  `forecast v1.0`, i celom `[PREDICTIVE ALERT] ...` porukom.
-- **Predicted vs actual chart** (gornji panel): izaberi u dropdown-u nešto što počinje sa
-  `1c:bf:ce:15:ec:4d-` (ovi uređaji imaju najviše temperaturu i najviše alertova) — biće plava
-  isprekidana forecast linija.
+- **U zaglavlju desno:** badge `Live` (zelen), `3 devices`, i `window tumbling · 10s`.
+- **Pipeline rail** (ispod zaglavlja): 4 faze sa živim brojačima — Ingestion `~30/s`,
+  eKuiper CEP, MaaS forecast, Alerts.
+- **Temperature forecast** (glavni panel): puna linija = actual, isprekidana + tačke = forecast.
+  U dropdown-u izaberi **Highly variable** (`1c:bf:ce:15:ec:4d`) — taj uređaj ima najviše alertova.
+- **Event stream** (dole-levo): legenda 4 tipa + rolling tabela. Dugme **"Events only"** sakriva
+  `WINDOW_METRICS` da ostanu samo zanimljivi događaji.
+- **Predictive alerts** (dole-desno): kartice `now XX.X°C → next XX.X°C` + delta badge +
+  `forecast v1.0`.
 
 ### ✅ 9) MaaS Swagger — ručan test predikcije
 
@@ -379,7 +395,134 @@ opet imaju `MaaS=next X.X°C`.
 
 ---
 
-## 5c. Šta je profesor tražio i kako da vizuelno demonstriraš svaku tačku
+## 5c. Kako se čita dashboard (šta koji element znači)
+
+> Ovo je "priručnik za ekran" — pročitaj pre odbrane. Cilj dashboard-a je da se **ceo pipeline
+> vidi na jednom ekranu**: sirovi podaci → eKuiper detekcija → MaaS predikcija → alert.
+
+### Zaglavlje (gore)
+
+| Element | Značenje |
+|---|---|
+| `Live` (zeleno) / `Offline` (crveno) | Socket.IO konekcija ka Analytics-u. Ako je `Offline`, Analytics je pao ili je CORS pogrešan — podaci na ekranu su tada stari. |
+| `3 devices` | Koliko različitih uređaja je viđeno u stream-u. Sa `NUM_DEVICES=3` očekuješ 3. |
+| `window tumbling · 10s` | **Koji eKuiper window je aktivan** — app ovo *ne čita iz konfiguracije*, nego **zaključuje iz samih podataka**: širina = `window_end − window_start`, korak = razmak između uzastopnih `window_start`. Ako prebaciš na hopping, badge sam postane `window hopping · 10s / 5s`. Dobar "gotcha" odgovor ako te pitaju kako znaš da je promena stvarno primenjena. |
+
+### Pipeline rail (traka sa 4 faze) — *signature* element
+
+Čita se **s leva na desno = tok podataka**:
+
+1. **Ingestion** `~30/s` — brzina dolaska događaja (mereno u browseru, poslednjih 5s).
+2. **eKuiper CEP** — ukupno detektovanih događaja od otvaranja stranice.
+3. **MaaS forecast** — koliko je alertova **stvarno dobilo predikciju** (uspešan `/predict`).
+4. **Alerts** — ukupno enriched alertova.
+
+> Ako **MaaS forecast** stoji na 0 a **Alerts** raste → MaaS je pao ili buffer još nije pun
+> (treba 4 window-a ≈ 40s). To je tačno fallback scenario iz provere ✅10.
+
+### Badge-evi tipova događaja (legenda u "Event stream")
+
+Boja = **ozbiljnost**, i namerno su samo 3 nivoa (koriste se semantički tokeni, ne sirove boje):
+
+| Badge | Tip | Šta znači | Koji uređaj ga pali |
+|---|---|---|---|
+| **Window metrics** (sivo, `secondary`) | `WINDOW_METRICS` | Rutinski 10-sekundni rollup — emituje se za **svaki** window, za svaki uređaj. To je "puls" sistema, ne alarm. | sva 3 |
+| **High CO** (crveno-roze, `default`) | `HIGH_CO` | **Per-message** pravilo: jedno jedino očitavanje je prešlo CO prag. Zato dolazi u naletima (spike), a ne ravnomerno. | `b8:27` |
+| **Sustained heat** (`default`) | `SUSTAINED_HIGH_TEMP` | **Windowed** pravilo (`HAVING AVG(temp) > 25`): prosek celog window-a je iznad praga → nije trenutni skok nego *trajno* stanje. | `1c:bf` (26.9 °C) |
+| **Heat + drying** (`destructive`) | `HEAT_DRYING` | **Korelacija dva uslova odjednom** (`AVG(temp) > 22 AND AVG(humidity) < 55`) — pravi CEP primer, ne obična if provera. | `b8:27` (toplo **i** suvo) |
+
+**Zašto je bitno da su različiti uređaji:** to nije slučajnost nego kalibracija (vidi
+`shared/thresholds.md`). Ako te pitaju "da li vaš CEP stvarno razlikuje uslove?" — pokažeš da
+`1c:bf` pali *sustained heat* a `b8:27` *heat+drying*, dok `00:0f` (hladan i vlažan) **ćuti**.
+Da su pragovi loši, sve bi palilo sve.
+
+**Dugme "Events only"** — sakriva `WINDOW_METRICS` redove. Koristi ga na odbrani: ostanu samo
+detektovani događaji i odmah se vidi da CEP radi selekciju, a ne da prosleđuje sve.
+
+### Grafikon "Temperature forecast" — najvažniji panel
+
+Dve serije za **izabrani uređaj** (dropdown gore desno):
+
+- **Puna linija = `actual_avg_temp`** — stvarni prosek temperature po window-u, iz
+  `WINDOW_METRICS`. To je "šta se desilo".
+- **Isprekidana linija + tačke = `forecast_next_avg_temp`** — predikcija MaaS-a za **sledeći**
+  window. To je "šta će se desiti".
+
+**Zašto je isprekidana i zašto je ispred pune linije:** forecast tačka se **ne crta na trenutku
+kad je nastala**, nego pomerena unapred za jednu širinu window-a
+(`window_end + (window_end − window_start)`) — jer se odnosi na *sledeći* window. Zato
+isprekidana linija **vodi** ispred pune. To je vizuelni dokaz da je alert **pre-emptive**
+(upozorava unapred), a ne reaktivan.
+
+> Ovo je bio i bug u v1 frontend-a: forecast je crtan na `window_end` triggerujućeg window-a, pa
+> se poredio forecast(t+1) sa actual(t) — grafikon je izgledao "pomeren". Sad je poravnato.
+
+**Kako da ga analiziraš (šta reći):**
+1. Izaberi **Highly variable** (`1c:bf`) — ima najviše događaja.
+2. Prati: kad puna linija raste, isprekidana tačka je **desno i gore** od nje → model je
+   predvideo rast pre nego što se desio.
+3. Poredi tačku sa punom linijom **u toj istoj tački na X osi** (a ne sa trenutnom vrednošću) —
+   tako se vidi koliko je predikcija bila tačna. Model ima test **R² = 0.988**, pa treba da
+   naliježe blizu.
+4. Tačke su retke a linija gusta — **normalno**: actual se crta za svaki window, a forecast samo
+   kad neko CEP pravilo okine (tj. kad ima šta da se javi).
+
+**Ako grafikon zjapi prazan:** ili uređaj još nema 4 window-a u bufferu (~40s), ili si izabrao
+`00:0f` koji nikad ne pali alert → nema forecast tačaka (actual linija ipak postoji).
+
+### Kartice "Predictive alerts"
+
+Jedna kartica = jedan enriched alert (jedan CEP događaj + jedan MaaS poziv):
+
+- **`now 25.6°C → next 27.6°C`** — levo actual (iz window-a koji je okinuo pravilo), desno
+  predikcija za sledeći window.
+- **Delta badge (`+2.0°C`, sa strelicom)** — razlika `next − now`. **Ovo je poenta cele
+  arhitekture**: eKuiper kaže "vruće je *sad*", MaaS dodaje "i biće **još** toplije".
+- **`forecast v1.0`** — verzija modela koja je dala predikciju (dolazi iz MaaS response-a).
+- **`CEP-only`** (umesto verzije) — MaaS nije odgovorio (pao je ili buffer nije pun), ali je
+  **alert i dalje emitovan**. To je namerno: pipeline ne sme da stane ako ML padne (D9/Phase-5
+  acceptance). Ako ovo pokažeš uz `docker stop iots-maas` — to je gotov odgovor na pitanje
+  "šta ako vam model padne?".
+
+### Uređaji u dropdown-u (šta je koji)
+
+| Naziv u UI | MAC | Ponašanje |
+|---|---|---|
+| **Cool & humid** | `00:0f:00:70:91:0a` | 19.6 °C, 75 % — stabilan, *baseline koji ne pali ništa* |
+| **Highly variable** | `1c:bf:ce:15:ec:4d` | 26.9 °C — najtopliji, pali `SUSTAINED_HIGH_TEMP` |
+| **Warm & dry** | `b8:27:eb:bf:9d:51` | 22.5 °C, 50 % — pali `HEAT_DRYING` i `HIGH_CO` |
+
+MAC adrese ništa ne znače publici, pa UI uz svaku piše i profil ("cool & humid") — to je isti
+razlog zašto legenda stoji stalno na ekranu umesto u tooltip-u (na projektoru se hover ne vidi).
+
+### Bonus demo: promeni window uživo (bez diranja SQL-a)
+
+U `docker\.env` postavi `WINDOW_TYPE=hopping` i `WINDOW_STEP=5`, pa samo re-provision-uj:
+
+```powershell
+docker compose -f docker/docker-compose.yml --profile mqtt --profile app `
+  --profile cep --profile ml --profile web up -d --force-recreate ekuiper-provision
+```
+
+Za ~10s badge u zaglavlju sam pređe sa `window tumbling · 10s` na `window hopping · 10s / 5s`,
+a događaji počnu da stižu **duplo češće** (window je i dalje 10s širok, ali se emituje na 5s, pa
+se prozori preklapaju). Grafikon i dalje radi. Poenta koju saopštavaš: **window je env-templated
+u `provision.sh`, SQL pravila se ne diraju** (D6).
+
+Dve stvari koje je korisno znati ako pitaju:
+
+- **`hopping`/`session` zahtevaju `WINDOW_STEP`.** Bez njega bi se generisao neispravan SQL
+  (`HOPPINGWINDOW(ss, 10, )`) i pravilo bi tiho ostalo nekreirano — zato `provision.sh` **pada
+  odmah** sa jasnom porukom (`requires WINDOW_STEP`, exit 1).
+- **`sliding` emituje jedan event po svakoj dolaznoj poruci** — to je *definicija* sliding
+  window-a u eKuiper-u, nije bug. Otud "gomila event-ova odjednom" u Network tab-u. Frontend to
+  preživi (pufer + downsampling na 1s), ali za demo koristi `hopping` — čitljivije je.
+
+`WINDOW_SIZE` ostavi na 10 i `LAG_WINDOWS` na 4 — model je treniran na tome (vidi sekciju 6).
+
+---
+
+## 5d. Šta je profesor tražio i kako da vizuelno demonstriraš svaku tačku
 
 | Tačka zadatka | Šta profesor traži | Kako da pokažeš (5-10 sekundi) |
 |---------------|---------------------|--------------------------------|
@@ -474,8 +617,8 @@ curl -X POST http://localhost:8000/predict `
 >
 > **Analytics je sada tanak orkestrator** — sluša događaje od eKuiper-a, za svaki događaj od
 > interesa zove `POST /predict`, kombinuje CEP detekciju sa ML predikcijom u obogaćeni
-> `[PREDICTIVE ALERT]`, i **push-uje sve u web app preko Socket.IO**. React + Vite + Tailwind
-> dashboard prikazuje event feed, alert kartice i predicted-vs-actual chart.
+> `[PREDICTIVE ALERT]`, i **push-uje sve u web app preko Socket.IO**. React + shadcn/ui
+> dashboard prikazuje pipeline traku, event stream, alert kartice i actual-vs-forecast chart.
 >
 > Sve u Dockeru, jedna komanda podiže ceo pipeline (5 profila), MaaS je **rezilijentan** (1s
 > timeout + CEP-only fallback), rules se provisionuju **preko REST-a a ne UI-a** (svež klon =

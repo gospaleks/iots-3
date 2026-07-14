@@ -2,8 +2,8 @@
 # --build-arg VITE_API_URL=... when building a non-localhost artifact.
 FROM node:22-alpine AS build
 WORKDIR /app
-COPY package.json ./
-RUN npm install --no-audit --no-fund
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
 COPY . .
 ARG VITE_API_URL=http://localhost:3003
 ENV VITE_API_URL=$VITE_API_URL
